@@ -7,7 +7,7 @@ class ComplexBf:
         self.imag = imag
 
     def __add__(self, other):
-        if not isinstance(other, ComplexBf):
+        if isinstance(other, BigFloat):
             real = self.real + other
             imag = self.imag
         else:
@@ -15,8 +15,11 @@ class ComplexBf:
             imag = self.imag + other.imag
         return ComplexBf(real, imag)
 
+    def __radd__(self, other):
+        return self.__add__(other)
+
     def __sub__(self, other):
-        if not isinstance(other, ComplexBf):
+        if isinstance(other, BigFloat):
             real = self.real - other
             imag = self.imag
         else:
@@ -24,21 +27,26 @@ class ComplexBf:
             imag = self.imag - other.imag
         return ComplexBf(real, imag)
 
+    def __rsub__(self, other):
+        return self.__sub__(other)
+
     def __mul__(self, other):
-        if not isinstance(other, ComplexBf):
-            real = self.real * other
-            imag = self.imag * other
-        else:
-            real = self.real * other.real - self.imag * other.imag
-            imag = 2 * self.real * self.imag
+        real = self.real * other.real - self.imag * other.imag
+        imag = self.real * other.imag + self.imag * other.real
         return ComplexBf(real, imag)
 
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
     def __truediv__(self, other):
-        if not isinstance(other, ComplexBf):
+        if not isinstance(other, ComplexBf) and not isinstance(other, complex):
             real = self.real / other
             imag = self.imag / other
             return ComplexBf(real, imag)
         raise NotImplementedError
+
+    def __rtruediv__(self, other):
+        return self.__truediv__(other)
 
     def __complex__(self):
         return complex(float(self.real), float(self.imag))
@@ -47,9 +55,3 @@ class ComplexBf:
         r = float(self.real)
         i = float(self.imag)
         return r*r + i*i
-
-
-ComplexBf.__rmul__ = ComplexBf.__mul__
-ComplexBf.__radd__ = ComplexBf.__add__
-ComplexBf.__rsub__ = ComplexBf.__sub__
-ComplexBf.__rtruediv__ = ComplexBf.__truediv__
