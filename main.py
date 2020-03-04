@@ -15,7 +15,7 @@ from bigfloat import BigFloat, Context, setcontext
 
 GLITCH_COLOUR = (255, 255, 255)
 BROT_COLOUR = (0, 0, 0)
-
+REF_COLOUR = (255, 0, 0)
 
 class Framework(Frame):
     def __init__(self, parent, height, width, b_left: ComplexBf, t_right: ComplexBf, iterations=None, save=False,
@@ -53,18 +53,27 @@ class Framework(Frame):
 
         recompute = Button(l_controls, command=self.compute_and_draw, text="recompute")
         recompute.pack(side=RIGHT)
-        self.iter_entry = Entry(l_controls, text="Iterations", width=10)
-        self.iter_entry.bind('<Return>', self.on_iter_submit)
-        self.iter_entry.pack(side=LEFT)
+
+        Label(l_controls, text="Max iterations", height=1).pack(side=LEFT)
+        self.iterations = StringVar(value=iterations)
+        iter_entry = Entry(l_controls, textvariable=self.iterations, width=10)
+        iter_entry.bind('<Return>', self.on_iter_submit)
+        iter_entry.pack(side=LEFT)
 
         check_pertubations = Checkbutton(pertubation_controls, text="use pertubations", variable=self.pertubations,
                                          command=self.set_pertubations)
-        self.num_probes_entry = Entry(pertubation_controls, text="num probes", width=5)
-        self.num_probes_entry.bind('<Return>', self.on_probes_submit)
-        self.num_probes_entry.pack(side=RIGHT)
-        self.num_series_entry = Entry(pertubation_controls, text="num series terms", width=5)
-        self.num_series_entry.bind('<Return>', self.on_series_submit)
-        self.num_series_entry.pack(side=RIGHT)
+
+        Label(pertubation_controls, text="Num probes", height=1).pack(side=LEFT)
+        self.num_probes = StringVar(value=num_probes)
+        probes_entry = Entry(pertubation_controls, textvariable=self.num_probes, width=4)
+        probes_entry.bind('<Return>', self.on_probes_submit)
+        probes_entry.pack(side=LEFT)
+
+        Label(pertubation_controls, text="Num series terms", height=1).pack(side=LEFT)
+        self.num_terms = StringVar(value=num_series_terms)
+        series_entry = Entry(pertubation_controls, textvariable=self.num_terms, width=2)
+        series_entry.bind('<Return>', self.on_series_submit)
+        series_entry.pack(side=LEFT)
 
         self.check_multiprocessing = Checkbutton(r_controls, text="use multiprocessing", variable=self.multiprocessing,
                                                  command=self.set_multiprocessing)
@@ -123,12 +132,9 @@ class Framework(Frame):
             self.compute_and_draw()
 
     def update_text_fields(self):
-        self.iter_entry.delete(0, END)
-        self.iter_entry.insert(0, self.fractal.iterations)
-        self.num_probes_entry.delete(0, END)
-        self.num_probes_entry.insert(0, self.fractal.num_probes)
-        self.num_series_entry.delete(0, END)
-        self.num_series_entry.insert(0, self.fractal.num_series_terms)
+        self.iterations.set(self.fractal.iterations)
+        self.num_terms.set(self.fractal.num_series_terms)
+        self.num_probes.set(self.fractal.num_probes)
 
     def reset(self):
         self.fractal.reset()
@@ -155,16 +161,16 @@ class Framework(Frame):
             self.set_mag()
 
     def on_iter_submit(self, event):
-        self.fractal.iterations = int(self.iter_entry.get())
+        self.fractal.iterations = int(self.iterations.get())
         self.set_palette()
         self.compute_and_draw()
 
     def on_series_submit(self, event):
-        self.fractal.num_series_terms = int(self.num_series_entry.get())
+        self.fractal.num_series_terms = int(self.num_terms.get())
         self.compute_and_draw()
 
     def on_probes_submit(self, event):
-        self.fractal.num_probes = int(self.num_probes_entry.get())
+        self.fractal.num_probes = int(self.num_probes.get())
         self.compute_and_draw()
 
     def on_button_press(self, event):
@@ -221,7 +227,7 @@ class Framework(Frame):
         blueb = 2 * math.pi / (self.blue_rand_b * (self.palette_length // 2) + self.palette_length // 2)
         bluec = 256 * self.blue_rand_c
 
-        self.palette = np.empty((iterations + 2, 3), dtype=np.uint8)
+        self.palette = np.empty((iterations + 3, 3), dtype=np.uint8)
         self.palette[0] = BROT_COLOUR
         for i in range(1, iterations + 1):
             x = i % self.palette_length
@@ -229,7 +235,8 @@ class Framework(Frame):
             g = clamp(int(128 * (math.sin(greenb * x + greenc) + 1)))
             b = clamp(int(128 * (math.sin(blueb * x + bluec) + 1)))
             self.palette[i] = [r, g, b]
-        self.palette[iterations + 1] = GLITCH_COLOUR
+        self.palette[iterations + 1] = REF_COLOUR
+        self.palette[iterations + 2] = GLITCH_COLOUR
 
     def generate_palette_variables(self):
         self.red_rand_b = random.random()
