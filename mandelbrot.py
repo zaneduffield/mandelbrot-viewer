@@ -8,7 +8,7 @@ from numba import int32, float32, float64, complex128, int64
 from bigfloat import BigFloat, Context, setcontext
 from complex_bf import ComplexBf
 from iterate import iterate, BREAKOUT_R_2
-from pertubations import mandelbrot_pertubation
+from pertubations import mandelbrot_pertubation, get_new_ref
 
 
 @njit(fastmath=True, parallel=True, nogil=True)
@@ -54,6 +54,7 @@ class Mandelbrot:
         self.multiprocessing = multiprocessing
 
         self.pertubations = pertubations
+        self.best_ref = None
         self.num_series_terms = num_series_terms
         self.num_probes = num_probes
 
@@ -83,8 +84,8 @@ class Mandelbrot:
         self._set_corners(b_left, t_right)
 
     def _set_corners(self, b_left: ComplexBf, t_right: ComplexBf):
-        height = float(t_right.imag - b_left.imag)
-        width = float(t_right.real - b_left.real)
+        height = t_right.imag - b_left.imag
+        width = t_right.real - b_left.real
 
         ratio_target = self.h/self.w
         ratio_curr = height/width
@@ -102,7 +103,8 @@ class Mandelbrot:
 
     def getPixels(self):
         if self.pertubations:
-            self.pixels = np.array(mandelbrot_pertubation(self.b_left, self.t_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms), dtype=np.int32)
+            self.pixels, self.best_ref = mandelbrot_pertubation(self.b_left, self.t_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms, self.best_ref)
+            self.pixels = np.array(self.pixels, dtype=np.int32)
         elif not self.cython:
             self.pixels = mandelbrot(complex(self.b_left), complex(self.t_right), self.h, self.w, self.iterations)
         else:

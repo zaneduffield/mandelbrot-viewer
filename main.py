@@ -277,8 +277,8 @@ def clamp(x):
 
 def main():
     master = Tk()
-    height = round(master.winfo_screenheight() * 0.8)
-    width = round(master.winfo_screenwidth() * 0.6)
+    height = round(master.winfo_screenheight() * 0.6)
+    width = round(master.winfo_screenwidth() * 0.7)
     parser = argparse.ArgumentParser(description='Generate the Mandelbrot set')
     parser.add_argument('-i', '--iterations', type=int, help='The number of iterations done for each pixel.',
                         default=500)
