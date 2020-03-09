@@ -10,20 +10,18 @@ from complex_bf import ComplexBf
 from mandelbrot import BREAKOUT_R_2
 
 BREAKOUT_R = math.sqrt(BREAKOUT_R_2)
-ERROR_THRESH = 0.01
-NUM_PROBES = 100
+ERROR_THRESH = 0.00001
 GLITCH_ITER = -1
 
 @njit
-def _iterate_series_constants(ref_hist, iterations: int, probe_deltas_init, terms, num_terms: int):
+def _iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int):
     probe_deltas_cur = probe_deltas_init.copy()
     num_terms = len(terms)
     terms[0][0] = 1
     for i in range(1, num_terms):
         terms[i][0] = 0
 
-    error_thresh_met = False
-    for i in range(iterations):
+    for i in range(ref_escaped_at):
         z_comp = ref_hist[i]
         terms[0][i + 1] = 2 * z_comp * terms[0][i] + 1
         for j in range(1, num_terms):
@@ -42,29 +40,27 @@ def _iterate_series_constants(ref_hist, iterations: int, probe_deltas_init, term
                 z_del_app += terms[k][i + 1] * delta
                 delta *= probe_deltas_init[j]
             if abs(probe_deltas_cur[j] - z_del_app) > ERROR_THRESH:
-                error_thresh_met = True
-                break
+                return i
 
-        if error_thresh_met:
-            break
-
-    return i
+    return ref_escaped_at
 
 
 def iterate_ref(ref: ComplexBf, iterations):
-    ref_hist = np.empty(iterations, dtype=np.complex_)
-    ref_escaped_at = 0
+    ref_hist = np.zeros(iterations, dtype=np.complex_)
+    ref_hist_abs = np.zeros(iterations, dtype=np.float64)
     ref_curr = ref
     for i in range(iterations):
-        ref_hist[i] = complex(ref_curr)
+        if ref_curr.abs_2() > BREAKOUT_R_2:
+            return ref_hist, ref_hist_abs, i
+        temp = complex(ref_curr)
+        ref_hist[i] = temp
+        ref_hist_abs[i] = abs(temp)
         ref_curr = ref_curr*ref_curr + ref
-        if not ref_escaped_at and ref_curr.abs_2() > BREAKOUT_R_2:
-            ref_escaped_at = i + 1
 
-    return ref_curr, ref_hist, ref_escaped_at
+    return ref_hist, ref_hist_abs, iterations
 
 
-def compute_series_constants(b_left: ComplexBf, t_right: ComplexBf, ref_init, ref_hist, iterations: int, num_terms, num_probes):
+def compute_series_constants(b_left: ComplexBf, t_right: ComplexBf, ref_init: ComplexBf, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
     probes = []
     square_side_len = int(math.sqrt(num_probes))
     for i in range(square_side_len):
@@ -72,30 +68,19 @@ def compute_series_constants(b_left: ComplexBf, t_right: ComplexBf, ref_init, re
             x_ratio, y_ratio = i/square_side_len, j/square_side_len
             probes.append(b_left + x_ratio*(t_right.real - b_left.real) + y_ratio*(t_right.imag - b_left.imag))
 
-    terms = np.empty((num_terms, iterations + 1), dtype=np.complex_, order="F")
+    terms = np.zeros((num_terms, iterations + 1), dtype=np.complex_, order="F")
     p_deltas_init = np.array([complex(p - ref_init) for p in probes])
-    accurate_iters = _iterate_series_constants(ref_hist, iterations, p_deltas_init, terms, num_terms)
+    accurate_iters = _iterate_series_constants(ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms)
     return terms, accurate_iters
 
 
-@njit
-def myave(ary, n):
-    avg_x = avg_y = 0
-    t = 1
-    for i in range(n):
-        avg_x += (ary[i][0] - avg_x) / t
-        avg_y += (ary[i][1] - avg_y) / t
-        t += 1
-    return avg_x, avg_y
-
-MAX_GLITCH_FIX_LOOPS = 5
+MAX_GLITCH_FIX_LOOPS = 20
 NUM_SERIES_TERMS = 10
-REF_GRID_WIDTH = 5
+NUM_RANDOM_REFS_DESPARATE = 15
 def mandelbrot_pertubation(b_left: ComplexBf, t_right: ComplexBf, height, width, iterations, num_probes, num_series_terms):
-    width_per_pixel = float(t_right.real - b_left.real)/width
-    height_per_pixel = float(t_right.imag - b_left.imag)/height
+    width_per_pixel = float((t_right.real - b_left.real)/width)
+    height_per_pixel = float((t_right.imag - b_left.imag)/height)
     iterations_grid = np.zeros((height, width), dtype=np.int32)
-    z_hist_abs = np.empty(iterations, dtype=np.double)
     ref_coords = width//2, height//2
     glitched_count = 0
     prev_refs = []
@@ -106,60 +91,65 @@ def mandelbrot_pertubation(b_left: ComplexBf, t_right: ComplexBf, height, width,
         return ComplexBf(b_left.real + r_prop * (t_right.real - b_left.real),
                              b_left.imag + i_prop * (t_right.imag - b_left.imag))
 
-    while loops < MAX_GLITCH_FIX_LOOPS:
-        print("computing series constants...")
+    while loops <= MAX_GLITCH_FIX_LOOPS:
         prev_refs.append(ref_coords)
         num_prev_refs += 1
+
         ref_r_prop = ref_coords[0] / width
         ref_i_prop = ref_coords[1] / height
         ref = _ref_from_prop(ref_r_prop, ref_i_prop)
-
-        ref_curr, ref_hist, ref_escaped_at = iterate_ref(ref, iterations)
-        terms, iter_accurate = compute_series_constants(b_left, t_right, ref, ref_hist, iterations, NUM_SERIES_TERMS, num_probes)
+        print("iterating reference")
+        ref_hist, ref_hist_abs, ref_escaped_at = iterate_ref(ref, iterations)
+        print("computing series constants...")
+        terms, iter_accurate = compute_series_constants(b_left, t_right, ref, ref_hist, ref_escaped_at, iterations, NUM_SERIES_TERMS, num_probes)
 
         print(f"proceeding with {iter_accurate} reference iterations")
-        breakout = ref_escaped_at or iterations
-        print(f"reference broke out at {breakout}")
+        print(f"reference broke out at {ref_escaped_at}")
 
-        iterations_computer = Precision(width_per_pixel, width, height_per_pixel, height, np.array(ref_coords), terms, num_series_terms, breakout,
-                                   ref_hist, z_hist_abs, iter_accurate, iterations)
-        if not glitched_count:
-            glitched_count = approximate_pixels(iterations_computer, iterations_grid)
+        pertubation_computer = PertubationComputer(
+            width_per_pixel, width, height_per_pixel, height, np.array(ref_coords), terms, num_series_terms,
+            ref_escaped_at, ref_hist, ref_hist_abs, iter_accurate, iterations
+        )
+        if not loops:
+            glitched_count = approximate_pixels(pertubation_computer, iterations_grid)
         else:
-            glitched_count = approximate_pixels(iterations_computer, iterations_grid, fix_glitches=True)
-
+            glitched_count = approximate_pixels(pertubation_computer, iterations_grid, fix_glitches=True)
         print(f"{glitched_count} glitched pixels remaining")
         if not glitched_count:
             break
-        else:
-            if glitched_count > 0.3 * height * width:
+        if glitched_count:
+            if glitched_count > 0.4 * height * width:
                 print("iterating multiple reference and choosing best")
                 best_iters = 0
-                for i in range(REF_GRID_WIDTH):
-                    for j in range(REF_GRID_WIDTH):
-                        test_ref = _ref_from_prop(i/REF_GRID_WIDTH, j/REF_GRID_WIDTH)
-                        _, __, ref_escaped_at = iterate_ref(test_ref, iterations)
-                        if ref_escaped_at > best_iters:
-                            ref_coords = i*width//REF_GRID_WIDTH, j*height//REF_GRID_WIDTH
-                            best_iters = ref_escaped_at
+                for _ in range(NUM_RANDOM_REFS_DESPARATE):
+                    r_prop, i_prop = random.random(), random.random()
+                    test_ref = _ref_from_prop(r_prop, i_prop)
+                    if test_ref in prev_refs:
+                        continue
+                    _, _, ref_escaped_at = iterate_ref(test_ref, iterations)
+                    if ref_escaped_at > best_iters:
+                        ref_coords = round(r_prop*width), round(i_prop*height)
+                        best_iters = ref_escaped_at
 
-                # ref_coords = get_random_new_ref(iterations_grid, width, height, glitched_count)
             else:
+                # ref_coords = get_random_new_ref(iterations_grid, width, height, glitched_count)
                 ref_coords = get_new_ref(iterations_grid, width, height, np.array(prev_refs), num_prev_refs)
             if ref_coords is None:
                 ref_coords = random.randint(0, width), random.randint(0, height)
             print(f"new ref at :{ref_coords}")
-
         loops += 1
 
     for x in prev_refs:
-        iterations_grid[x[1], x[0]] = iterations + 1
+        try:
+            iterations_grid[x[1], x[0]] = iterations + 1
+        except IndexError:
+            print("debug here")
 
     return iterations_grid
 
 @njit
 def get_random_new_ref(iterations_grid, width, height, glitched_count):
-    x = random.randint(0, glitched_count)
+    x = random.randint(0, glitched_count - 1)
     for j in range(height):
         for i in range(width):
             if iterations_grid[j, i] == GLITCH_ITER:
@@ -167,51 +157,61 @@ def get_random_new_ref(iterations_grid, width, height, glitched_count):
                     return i, j
                 x -= 1
 
-JUMP = 5
-EXCLUDE_RADIUS_2 = 25**2
+JUMP = 1
+EXCLUDE_RADIUS_2 = 1**2
 @njit
 def get_new_ref(iterations_grid, width, height, exclude_refs, num_exclude_refs):
     # find center of tha largest blob
+    grid = np.empty((height, width), dtype=np.int32)
     best_point = (0, 0)
     best_size = 0
-    for j in range(0, height):
-        row_best_point = (0, 0)
-        row_best_size = 0
+    for j in range(0, height, JUMP):
         i = 0
         while i < width:
-            i += 1
-            if iterations_grid[j, i] != GLITCH_ITER:
-                continue
-            # find right edge of glitched blob
-            for k in range(i + 1, width):
-                if iterations_grid[j, k] != GLITCH_ITER:
-                    break
-                blob_x = k
-                blob_width = k - i
-                # find bottom edge of glitched blob
-                for k in range(j + 1, height):
-                    if iterations_grid[k, blob_x] != GLITCH_ITER:
+            blob_best_height_at_x = i
+            blob_best_height = 0
+            blob_width = 0
+            if iterations_grid[j, i] == GLITCH_ITER:
+                # find right edge of glitched blob
+                blob_start_x = i
+                blob_width = 1
+                for k in range(i + 1, width):
+                    if iterations_grid[j, k] != GLITCH_ITER:
+                        blob_width = k - blob_start_x
                         break
-                blob_y = (k + j)//2
-                blob_height = k - j
-                # blob_height, mid_y = 0, j
-                if blob_width + blob_height > row_best_size:
-                    row_best_point = blob_x, blob_y
-                    row_best_size = blob_width + blob_height
+                    blob_width = k - blob_start_x + 1
+                    cur_x = k
+                    # find top edge of glitched blob
+                    blob_y_max = j
+                    for k in range(j + 1, height):
+                        blob_y_max = k - 1
+                        if iterations_grid[k, cur_x] != GLITCH_ITER:
+                            break
+                    # find bottom edge of glitched blob
+                    blob_y_min = j
+                    for k in range(j - 1, -1, -1):
+                        blob_y_min = k + 1
+                        if iterations_grid[k, cur_x] != GLITCH_ITER:
+                            break
+                    blob_height = blob_y_max - blob_y_min + 1
+                    if blob_height > blob_best_height:
+                        blob_best_height_at_x = cur_x
+                        blob_best_height = blob_height
+                    i += 1
 
-                i += 1
+            if blob_best_height + blob_width > best_size:
+                excluded = False
+                for m in range(num_exclude_refs):
+                    ref = exclude_refs[m]
+                    delta = ref[0] - blob_best_height_at_x, ref[1] - j
+                    if delta[0]*delta[0] + delta[1]*delta[1] < EXCLUDE_RADIUS_2:
+                        excluded = True
+                        break
+                if not excluded:
+                    best_point = blob_best_height_at_x, j
+                    best_size = blob_width + blob_best_height
 
-        if row_best_size > best_size:
-            excluded = False
-            for m in range(num_exclude_refs):
-                ref = exclude_refs[m]
-                delta = ref[0] - row_best_point[0], ref[1] - row_best_point[1]
-                if delta[0]*delta[0] + delta[1]*delta[1] < EXCLUDE_RADIUS_2:
-                    excluded = True
-                    break
-            if not excluded:
-                best_point = row_best_point
-                best_size = row_best_size
+            i += JUMP
 
     return best_point
 
@@ -229,12 +229,12 @@ spec = [
     ('precise_reference_abs', float64[:]),
     ('iter_accurate', int64),
     ('iterations', int64),
-    ('init_deltas_iter', complex128[:, :]),
+    # ('init_deltas_iter', complex128[:, :]),
     ('deltas_iter', complex128[:, :])
 ]
 
 @jitclass(spec)
-class Precision:
+class PertubationComputer:
     def __init__(self, w_per_pix, width, h_per_pix, height, ref_coords, terms, num_terms, breakout,
                         precise_reference, precise_reference_abs, iter_accurate, iterations):
         self.w_per_pix = w_per_pix
@@ -248,12 +248,6 @@ class Precision:
         self.precise_reference_abs = precise_reference_abs
         self.iter_accurate = iter_accurate
         self.iterations = iterations
-
-        self.init_deltas_iter = np.empty((self.height, self.width), dtype=np.complex_)
-        self.deltas_iter = np.empty((self.height, self.width), dtype=np.complex_)
-        for j in range(self.height):
-            for i in range(self.width):
-                self.init_deltas_iter[j, i] = self.get_estimate(i, j, self.iter_accurate - 1)
 
     def search_for_escape(self, lo, hi, x, y):
         while hi != lo:
@@ -280,48 +274,52 @@ class Precision:
         return out
 
     def approximate_pixel(self, x, y, iterations_grid):
-        self.deltas_iter[y, x] = self.get_estimate(x, y, self.iter_accurate - 1)
+        # TODO: why does using iter_accurate without -1 cause issues???
+        delta_i = self.get_estimate(x, y, self.iter_accurate)
         delta_0 = self.get_delta(x, y)
+        this_breakout = 0
         for i in range(self.iter_accurate, self.breakout):
-            delta_i = self.deltas_iter[y, x]
-            x_i = self.precise_reference[i - 1]
+            x_i = self.precise_reference[i]
             actual_size = abs(delta_i + x_i)
             # detect glitched pixels
-            if actual_size < 0.001 * self.precise_reference_abs[i-1]:
+            if actual_size < 0.001 * self.precise_reference_abs[i]:
                 iterations_grid[y, x] = GLITCH_ITER
                 return -1
 
             if actual_size <= BREAKOUT_R:
-                self.deltas_iter[y, x] = 2 * self.precise_reference[i - 1] * delta_i + delta_i * delta_i + delta_0
+                delta_i = 2 * self.precise_reference[i] * delta_i + delta_i * delta_i + delta_0
             else:
                 break
+            this_breakout = i + 1
 
-        if i == self.breakout - 1:
+        if this_breakout == 0:
+            # broke out before iterating, find true breakout value using binary search on accurate estimations
+            iterations_grid[y, x] = self.search_for_escape(0, self.iter_accurate, x, y) + 1
+        elif this_breakout == self.breakout:
             if self.breakout < self.iterations:
                 iterations_grid[y, x] = GLITCH_ITER
                 return 1
             else:
                 iterations_grid[y, x] = 0
-        elif i == self.iter_accurate:
-            # if broke out before iterating, find true breakout value using binary search on accurate estimations
-            iterations_grid[y, x] = self.search_for_escape(0, self.iter_accurate, x, y) + 1
         else:
-            iterations_grid[y, x] = i
+            iterations_grid[y, x] = this_breakout
 
         return 0
 
 
-@njit(parallel=True, fastmath=True)
-def approximate_pixels(precision: Precision, iterations_grid, fix_glitches: bool = False):
+@njit(parallel=True)
+def approximate_pixels(precision: PertubationComputer, iterations_grid, fix_glitches: bool = False):
     glitched_count = 0
     legit_glitched_count = 0
 
-    for j in prange(precision.height):
-        for i in range(precision.width):
-            if fix_glitches and iterations_grid[j, i] != GLITCH_ITER:
+    for y in prange(precision.height):
+        for x in range(precision.width):
+            if fix_glitches and iterations_grid[y, x] != GLITCH_ITER:
                 continue
-            result = precision.approximate_pixel(i, j, iterations_grid)
+            result = precision.approximate_pixel(x, y, iterations_grid)
             if result:
+                if glitched_count == 0:
+                    print(x, y)
                 glitched_count += 1
                 if result < 0:
                     legit_glitched_count += 1
