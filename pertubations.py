@@ -60,13 +60,14 @@ def iterate_ref(ref: ComplexBf, iterations):
     return ref_hist, ref_hist_abs, iterations
 
 
-def compute_series_constants(b_left: ComplexBf, t_right: ComplexBf, ref_init: ComplexBf, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
+def compute_series_constants(t_left: ComplexBf, b_right: ComplexBf, ref_init: ComplexBf, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
     probes = []
     square_side_len = int(math.sqrt(num_probes))
     for i in range(square_side_len):
         for j in range(square_side_len):
             x_ratio, y_ratio = i/square_side_len, j/square_side_len
-            probes.append(b_left + x_ratio*(t_right.real - b_left.real) + y_ratio*(t_right.imag - b_left.imag))
+            probe_del = ComplexBf(BigFloat(x_ratio*(b_right.real - t_left.real)), BigFloat(-y_ratio*(t_left.imag - b_right.imag)))
+            probes.append(t_left + probe_del)
 
     terms = np.zeros((num_terms, iterations + 1), dtype=np.complex_, order="F")
     p_deltas_init = np.array([complex(p - ref_init) for p in probes])
@@ -74,40 +75,36 @@ def compute_series_constants(b_left: ComplexBf, t_right: ComplexBf, ref_init: Co
     return terms, accurate_iters
 
 
-MAX_GLITCH_FIX_LOOPS = 20
+MAX_GLITCH_FIX_LOOPS = 5
 NUM_SERIES_TERMS = 10
 NUM_RANDOM_REFS_DESPARATE = 15
 MAX_GLITCH_COUNT = 10
-def mandelbrot_pertubation(b_left: ComplexBf, t_right: ComplexBf, height, width, iterations, num_probes, num_series_terms, init_ref):
-    width_per_pixel = float((t_right.real - b_left.real)/width)
-    height_per_pixel = float((t_right.imag - b_left.imag)/height)
+def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width, iterations, num_probes, num_series_terms, init_ref):
+    width_per_pixel = float((b_right.real - t_left.real)/width)
+    height_per_pixel = float((t_left.imag - b_right.imag)/height)
     iterations_grid = np.zeros((height, width), dtype=np.int32)
-    if init_ref is None:
-        ref_coords = width//2, height//2
-    else:
-        diag = t_right - b_left
-        ref_diag = init_ref - b_left
-        ref_coords = round(float(width*(ref_diag.real/diag.real))), round(float((height*(ref_diag.imag/diag.imag))))
+    # if init_ref is None:
+    ref_coords = width//2, height//2
+    # else:
+    #     diag = b_right - t_left
+    #     ref_diag = init_ref - t_left
+    #     ref_coords = round(float(width*(ref_diag.real/diag.real))), round(float((height*(ref_diag.imag/diag.imag))))
     prev_refs = []
     num_prev_refs = 0
     loops = 0
 
     def _ref_from_coords(coords):
-        return ComplexBf(b_left.real + coords[0]/width * (t_right.real - b_left.real),
-                         b_left.imag + coords[1]/height * (t_right.imag - b_left.imag))
+        return ComplexBf(t_left.real + coords[0]*width_per_pixel, t_left.imag - coords[1]*height_per_pixel)
 
     while loops <= MAX_GLITCH_FIX_LOOPS:
         prev_refs.append(ref_coords)
         num_prev_refs += 1
 
         ref = _ref_from_coords(ref_coords)
-        if loops == 0 and init_ref is not None:
-            if (ref - init_ref).abs_2() > width_per_pixel*height_per_pixel:
-                print("debug here")
         print("iterating reference")
         ref_hist, ref_hist_abs, ref_escaped_at = iterate_ref(ref, iterations)
         print("computing series constants...")
-        terms, iter_accurate = compute_series_constants(b_left, t_right, ref, ref_hist, ref_escaped_at, iterations, NUM_SERIES_TERMS, num_probes)
+        terms, iter_accurate = compute_series_constants(t_left, b_right, ref, ref_hist, ref_escaped_at, iterations, NUM_SERIES_TERMS, num_probes)
 
         print(f"proceeding with {iter_accurate} reference iterations")
         print(f"reference broke out at {ref_escaped_at}")
@@ -145,12 +142,13 @@ def mandelbrot_pertubation(b_left: ComplexBf, t_right: ComplexBf, height, width,
             print(f"new ref at :{ref_coords}")
         loops += 1
 
-    # for x in prev_refs[1:]:
-    #     try:
-    #         iterations_grid[x[1], x[0]] = iterations + 1
-    #     except IndexError:
-    #         print("debug here")
+    for x in prev_refs[1:]:
+        try:
+            iterations_grid[x[1], x[0]] = iterations + 1
+        except IndexError:
+            print("debug here")
 
+    # TODO: fix
     ref_coords = get_coord_max_iter(iterations_grid, width, height)
     next_ref = _ref_from_coords(ref_coords)
     return iterations_grid, next_ref
@@ -287,7 +285,7 @@ class PertubationComputer:
 
     def get_delta(self, i, j):
         hor_delta = (i - self.ref_coords[0]) * self.w_per_pix
-        ver_delta = (j - self.ref_coords[1]) * self.h_per_pix
+        ver_delta = (self.ref_coords[1] - j) * self.h_per_pix
         return complex(hor_delta, ver_delta)
 
     def get_estimate(self, i, j, iteration):

@@ -18,7 +18,7 @@ BROT_COLOUR = (0, 0, 0)
 REF_COLOUR = (255, 0, 0)
 
 class Framework(Frame):
-    def __init__(self, parent, height, width, b_left: ComplexBf, t_right: ComplexBf, iterations=None, save=False,
+    def __init__(self, parent, height, width, t_left: ComplexBf, b_right: ComplexBf, iterations=None, save=False,
                  use_cython: bool = True,
                  use_multiprocessing: bool = True, pertubations: bool = False, palette_length: int = 300,
                  num_probes: int = 100,
@@ -99,7 +99,7 @@ class Framework(Frame):
         self.canvas.bind("<B1-Motion>", self.on_move_press)
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
 
-        self.fractal = Mandelbrot(b_left=b_left, t_right=t_right, iterations=iterations, width=width, height=height,
+        self.fractal = Mandelbrot(t_left=t_left, b_right=b_right, iterations=iterations, width=width, height=height,
                                   cython=use_cython, multiprocessing=self.multiprocessing.get(),
                                   pertubations=pertubations, num_probes=num_probes, num_series_terms=num_series_terms)
         self.image_stack = []
@@ -149,7 +149,7 @@ class Framework(Frame):
 
     def set_mag(self):
         self.mag.config(state=NORMAL)
-        width = float(self.fractal.t_right.real - self.fractal.b_left.real)
+        width = self.fractal.get_width()
         self.mag.replace("1.0", "1.end", f"width: {'{:.2e}'.format(width)}")
         self.mag.config(state=DISABLED)
 
@@ -192,10 +192,10 @@ class Framework(Frame):
             return
 
         x = self.canvas.coords(self.rect)
-        b_left_coords = (min(x[0], x[2]), min(x[1], x[3]))
-        t_right_coords = (max(x[0], x[2]), max(x[1], x[3]))
+        t_left_coords = (min(x[0], x[2]), min(x[1], x[3]))
+        b_right_coords = (max(x[0], x[2]), max(x[1], x[3]))
 
-        self.fractal.reposition(b_left_coords=b_left_coords, t_right_coords=t_right_coords)
+        self.fractal.reposition(t_left_coords=t_left_coords, b_right_coords=b_right_coords)
         self.image_stack.append(self.background)
         self.canvas.delete(self.rect)
         self.rect = None
@@ -282,14 +282,14 @@ def main():
     parser = argparse.ArgumentParser(description='Generate the Mandelbrot set')
     parser.add_argument('-i', '--iterations', type=int, help='The number of iterations done for each pixel.',
                         default=500)
-    parser.add_argument('-blr', '--bottom-left-real', type=str,
-                        help='The bottom-left real coordinate of the area to render in str form', default="-1.5")
-    parser.add_argument('-bli', '--bottom-left-imag', type=str,
-                        help='The bottom-left imag coordinate of the area to render in str form', default="-1.25")
-    parser.add_argument('-trr', '--top-right-real', type=str,
-                        help='The top-right real coordinate of the area to render in str form', default="0.5")
-    parser.add_argument('-tri', '--top-right-imag', type=str,
-                        help='The top-right imag coordinate of the area to render in str form', default="1.25")
+    parser.add_argument('-tlr', '--top-left-real', type=str,
+                        help='The top-left real coordinate of the area to render in str form', default="-1.5")
+    parser.add_argument('-tli', '--top-left-imag', type=str,
+                        help='The top-left imag coordinate of the area to render in str form', default="1.25")
+    parser.add_argument('-brr', '--bottom-right-real', type=str,
+                        help='The bottom-right real coordinate of the area to render in str form', default="0.5")
+    parser.add_argument('-bri', '--bottom-right-imag', type=str,
+                        help='The bottom-right imag coordinate of the area to render in str form', default="-1.25")
     parser.add_argument('-w', '--width', type=int, help='The width of the image.')
     parser.add_argument('-s', '--save', action='store_true', help='Save the generated image.')
     parser.add_argument('-nc', '--no-cython', action='store_false', help="Don't use local cython binary.")
@@ -298,10 +298,10 @@ def main():
 
     setcontext(Context(precision=200))
 
-    b_left = ComplexBf(BigFloat(args.bottom_left_real), BigFloat(args.bottom_left_imag))
-    t_right = ComplexBf(BigFloat(args.top_right_real), BigFloat(args.top_right_imag))
+    t_left = ComplexBf(BigFloat(args.top_left_real), BigFloat(args.top_left_imag))
+    b_right = ComplexBf(BigFloat(args.bottom_right_real), BigFloat(args.bottom_right_imag))
     render = Framework(parent=master, height=height, width=width, use_cython=args.no_cython,
-                       use_multiprocessing=args.no_multiprocessing, b_left=b_left, t_right=t_right,
+                       use_multiprocessing=args.no_multiprocessing, t_left=t_left, b_right=b_right,
                        iterations=args.iterations, save=args.save)
 
     master.geometry("{}x{}".format(render.canvasW, render.canvasH))
