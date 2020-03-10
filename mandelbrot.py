@@ -82,7 +82,7 @@ class Mandelbrot:
     def _set_corners(self, t_left: ComplexBf, b_right: ComplexBf):
         height = t_left.imag - b_right.imag
         width = b_right.real - t_left.real
-        setcontext(context=Context(precision=100))
+        setcontext(context=Context(precision=200))
 
         ratio_target = self.h/self.w
         ratio_curr = height/width

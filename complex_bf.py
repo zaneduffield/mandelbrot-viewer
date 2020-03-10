@@ -51,6 +51,9 @@ class ComplexBf:
     def __complex__(self):
         return complex(float(self.real), float(self.imag))
 
+    def __str__(self):
+        return str((str(self.real), str(self.imag)))
+
     def abs_2(self):
         r = float(self.real)
         i = float(self.imag)

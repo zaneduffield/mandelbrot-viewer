@@ -48,6 +48,8 @@ class Framework(Frame):
         l_controls = Frame(ui)
         l_controls.pack(side=LEFT)
 
+        copy_coords = Button(l_controls, command=self.copy_coords, text="copy coords")
+        copy_coords.pack(side=RIGHT)
         recompute = Button(l_controls, command=self.compute_and_draw, text="recompute")
         recompute.pack(side=RIGHT)
 
@@ -103,6 +105,15 @@ class Framework(Frame):
         self.save = save
         self.update_text_fields()
         self.compute_and_draw()
+
+    def copy_coords(self):
+        self.parent.clipboard_clear()
+        self.parent.clipboard_append(f'-tlr " {float(self.fractal.t_left.real)}" '
+                                     f'-tli " {float(self.fractal.t_left.imag)}" '
+                                     f'-bri " {float(self.fractal.b_right.imag)}" '
+                                     f'-brr " {float(self.fractal.b_right.real)}" '
+                                     f'-i {self.fractal.iterations}')
+        self.parent.update()
 
     def set_pertubations(self):
         self.fractal.pertubations = self.pertubations.get()
@@ -244,15 +255,6 @@ class Framework(Frame):
         self.img.save("output/{}.png".format(time.strftime("%Y-%m-%d-%H:%M:%S")), "PNG", optimize=True)
 
 
-# @njit
-def array_modulo(arr, shape, x):
-    out = np.empty(shape, dtype=np.uint8)
-    for i in range(shape[0]):
-        for j in range(shape[1]):
-            out[i, j] = arr[i, j] % x
-    return out
-
-
 def clamp(x):
     return max(0, min(x, 255))
 
@@ -281,6 +283,7 @@ def main():
 
     t_left = ComplexBf(BigFloat(args.top_left_real), BigFloat(args.top_left_imag))
     b_right = ComplexBf(BigFloat(args.bottom_right_real), BigFloat(args.bottom_right_imag))
+    print(t_left, b_right)
     render = Framework(parent=master, height=height, width=width, use_multiprocessing=args.no_multiprocessing,
                        t_left=t_left, b_right=b_right, iterations=args.iterations, save=args.save)
 
