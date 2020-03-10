@@ -17,9 +17,9 @@ GLITCH_COLOUR = (255, 255, 255)
 BROT_COLOUR = (0, 0, 0)
 REF_COLOUR = (255, 0, 0)
 
+
 class Framework(Frame):
     def __init__(self, parent, height, width, t_left: ComplexBf, b_right: ComplexBf, iterations=None, save=False,
-                 use_cython: bool = True,
                  use_multiprocessing: bool = True, pertubations: bool = False, palette_length: int = 300,
                  num_probes: int = 100,
                  num_series_terms: int = 5):
@@ -27,14 +27,11 @@ class Framework(Frame):
         self.parent = parent
         self.parent.title("Mandelbrot")
 
-        self.use_cython = use_cython
         self.canvasW, self.canvasH = width, height
         self.palette_length = palette_length
 
-        self.cython = BooleanVar()
-        self.cython.set(use_cython)
         self.multiprocessing = BooleanVar()
-        self.multiprocessing.set(use_multiprocessing if use_cython else False)
+        self.multiprocessing.set(use_multiprocessing)
         self.pertubations = BooleanVar()
         self.pertubations.set(pertubations)
         self.init_iterations = iterations
@@ -71,15 +68,12 @@ class Framework(Frame):
 
         Label(pertubation_controls, text="Num series terms", height=1).pack(side=LEFT)
         self.num_terms = StringVar(value=num_series_terms)
-        series_entry = Entry(pertubation_controls, textvariable=self.num_terms, width=2)
+        series_entry = Entry(pertubation_controls, textvariable=self.num_terms, width=3)
         series_entry.bind('<Return>', self.on_series_submit)
         series_entry.pack(side=LEFT)
 
         self.check_multiprocessing = Checkbutton(r_controls, text="use multiprocessing", variable=self.multiprocessing,
                                                  command=self.set_multiprocessing)
-        check_cython = Checkbutton(r_controls, text="use cython", variable=self.cython, command=self.set_cython)
-        if not self.cython.get():
-            self.check_multiprocessing.config(state=DISABLED)
         back = Button(r_controls, command=self.go_back, text="go back")
         colour = Button(r_controls, command=self.recolour, text="recolour")
         reset = Button(r_controls, command=self.reset, text="reset")
@@ -90,7 +84,6 @@ class Framework(Frame):
         colour.pack(side=RIGHT)
         check_pertubations.pack(side=RIGHT)
         self.check_multiprocessing.pack(side=RIGHT)
-        check_cython.pack(side=RIGHT)
 
         self.pack(fill=BOTH, expand=1)
         self.canvas = Canvas(self)
@@ -100,8 +93,8 @@ class Framework(Frame):
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
 
         self.fractal = Mandelbrot(t_left=t_left, b_right=b_right, iterations=iterations, width=width, height=height,
-                                  cython=use_cython, multiprocessing=self.multiprocessing.get(),
-                                  pertubations=pertubations, num_probes=num_probes, num_series_terms=num_series_terms)
+                                  multiprocessing=self.multiprocessing.get(), pertubations=pertubations,
+                                  num_probes=num_probes, num_series_terms=num_series_terms)
         self.image_stack = []
         self.computed_cur_img = True
         self.change_palette()
@@ -113,13 +106,6 @@ class Framework(Frame):
 
     def set_pertubations(self):
         self.fractal.pertubations = self.pertubations.get()
-
-    def set_cython(self):
-        self.fractal.cython = self.cython.get()
-        if self.cython.get():
-            self.check_multiprocessing.config(state=NORMAL)
-        else:
-            self.check_multiprocessing.config(state=DISABLED)
 
     def set_multiprocessing(self):
         self.fractal.multiprocessing = self.multiprocessing.get()
@@ -181,11 +167,7 @@ class Framework(Frame):
         if self.rect is None:
             self.rect = self.canvas.create_rectangle(self.start_click[0], self.start_click[1], 1, 1, fill="")
 
-        y_diff = abs(event.x - self.start_click[0])
-        y_diff *= (self.canvasH / self.canvasW)
-        if event.y < self.start_click[1]:
-            y_diff *= -1
-        self.canvas.coords(self.rect, self.start_click[0], self.start_click[1], event.x, self.start_click[1] + y_diff)
+        self.canvas.coords(self.rect, self.start_click[0], self.start_click[1], event.x, event.y)
 
     def on_button_release(self, event):
         if self.rect is None:
@@ -204,7 +186,7 @@ class Framework(Frame):
     def compute_and_draw(self):
         print('-' * 20)
         start = time.time()
-        self.fractal.getPixels()
+        self.fractal.get_pixels()
         comp_time = time.time()
         print("computation took {} seconds".format(round(comp_time - start, 2)))
         self.draw()
@@ -292,17 +274,15 @@ def main():
                         help='The bottom-right imag coordinate of the area to render in str form', default="-1.25")
     parser.add_argument('-w', '--width', type=int, help='The width of the image.')
     parser.add_argument('-s', '--save', action='store_true', help='Save the generated image.')
-    parser.add_argument('-nc', '--no-cython', action='store_false', help="Don't use local cython binary.")
-    parser.add_argument('-nm', '--no-multiprocessing', action='store_false', help="Don't use local cython binary.")
+    parser.add_argument('-nm', '--no-multiprocessing', action='store_false', help="Don't use multiprocessing.")
     args = parser.parse_args()
 
     setcontext(Context(precision=200))
 
     t_left = ComplexBf(BigFloat(args.top_left_real), BigFloat(args.top_left_imag))
     b_right = ComplexBf(BigFloat(args.bottom_right_real), BigFloat(args.bottom_right_imag))
-    render = Framework(parent=master, height=height, width=width, use_cython=args.no_cython,
-                       use_multiprocessing=args.no_multiprocessing, t_left=t_left, b_right=b_right,
-                       iterations=args.iterations, save=args.save)
+    render = Framework(parent=master, height=height, width=width, use_multiprocessing=args.no_multiprocessing,
+                       t_left=t_left, b_right=b_right, iterations=args.iterations, save=args.save)
 
     master.geometry("{}x{}".format(render.canvasW, render.canvasH))
     master.mainloop()

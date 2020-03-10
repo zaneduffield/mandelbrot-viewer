@@ -3,20 +3,19 @@ import random
 from typing import List
 
 import numpy as np
-from numba import jit, jitclass, njit, prange
+from numba import jit, jitclass, njit, prange, gdb
 from numba import int32, float32, float64, complex128, int64
 from bigfloat import BigFloat, Context, setcontext
 from complex_bf import ComplexBf
 from mandelbrot import BREAKOUT_R_2
-
 BREAKOUT_R = math.sqrt(BREAKOUT_R_2)
 ERROR_THRESH = 0.00001
 GLITCH_ITER = -1
 
-@njit
+
+# @njit
 def _iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int):
     probe_deltas_cur = probe_deltas_init.copy()
-    num_terms = len(terms)
     terms[0][0] = 1
     for i in range(1, num_terms):
         terms[i][0] = 0
@@ -28,6 +27,8 @@ def _iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, 
             s = 0
             for k in range(j):
                 s += terms[k][i] * terms[j - k - 1][i]
+                if np.isnan(s):
+                    break
             terms[j][i + 1] = 2 * z_comp * terms[j][i] + s
 
         for j in range(len(probe_deltas_init)):
@@ -37,7 +38,10 @@ def _iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, 
             z_del_app = 0
             delta = probe_deltas_init[j]
             for k in range(num_terms):
-                z_del_app += terms[k][i + 1] * delta
+                term = terms[k][i + 1]
+                if np.isnan(term):
+                    break
+                z_del_app += term * delta
                 delta *= probe_deltas_init[j]
             if abs(probe_deltas_cur[j] - z_del_app) > ERROR_THRESH:
                 return i
@@ -76,7 +80,6 @@ def compute_series_constants(t_left: ComplexBf, b_right: ComplexBf, ref_init: Co
 
 
 MAX_GLITCH_FIX_LOOPS = 5
-NUM_SERIES_TERMS = 10
 NUM_RANDOM_REFS_DESPARATE = 15
 MAX_GLITCH_COUNT = 10
 def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width, iterations, num_probes, num_series_terms, init_ref):
@@ -104,7 +107,7 @@ def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width,
         print("iterating reference")
         ref_hist, ref_hist_abs, ref_escaped_at = iterate_ref(ref, iterations)
         print("computing series constants...")
-        terms, iter_accurate = compute_series_constants(t_left, b_right, ref, ref_hist, ref_escaped_at, iterations, NUM_SERIES_TERMS, num_probes)
+        terms, iter_accurate = compute_series_constants(t_left, b_right, ref, ref_hist, ref_escaped_at, iterations, num_series_terms, num_probes)
 
         print(f"proceeding with {iter_accurate} reference iterations")
         print(f"reference broke out at {ref_escaped_at}")
@@ -293,7 +296,10 @@ class PertubationComputer:
         delta = init_delta
         out = 0
         for k in range(self.num_terms):
-            out += self.terms[k][iteration] * delta
+            term = self.terms[k][iteration]
+            if np.isnan(term):
+                break
+            out += term * delta
             delta *= init_delta
         return out
 
