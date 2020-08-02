@@ -7,9 +7,11 @@ from numba import jit, jitclass, njit, prange
 from numba import int32, float32, float64, complex128, int64
 from bigfloat import BigFloat, Context, setcontext
 from complex_bf import ComplexBf
+from opencl_test import MandelbrotCL
 
 BREAKOUT_R_2 = 20
 from pertubations import mandelbrot_pertubation, get_new_ref
+
 
 @njit(fastmath=True, parallel=True, nogil=True)
 def mandelbrot(t_left, b_right, height, width, iters):
@@ -40,7 +42,7 @@ def mandelbrot(t_left, b_right, height, width, iters):
 
 class Mandelbrot:
     def __init__(self, width: int, height: int, t_left: ComplexBf, b_right: ComplexBf, iterations: int,
-                 multiprocessing: bool, pertubations: bool, num_series_terms, num_probes):
+                 multiprocessing: bool, gpu: bool, pertubations: bool, num_series_terms, num_probes):
         self.w = width
         self.h = height
         self.corners_stack = []
@@ -51,15 +53,23 @@ class Mandelbrot:
         self.multiprocessing = multiprocessing
 
         self.pertubations = pertubations
-        self.best_ref = None
         self.num_series_terms = num_series_terms
         self.num_probes = num_probes
+
+        self.gpu = gpu
+        self.cl = None
+        self.set_gpu(gpu)
 
         self.pixels: np.array = None
 
     def reset(self):
         self._set_corners(*self.init_corners)
         self.corners_stack = []
+
+    def set_gpu(self, gpu: bool):
+        self.gpu = gpu
+        if self.gpu and self.cl is None:
+            self.cl = MandelbrotCL(self.w, self.h)
 
     def pop_corners(self):
         if not self.corners_stack:
@@ -103,8 +113,10 @@ class Mandelbrot:
 
     def get_pixels(self):
         if self.pertubations:
-            self.pixels, self.best_ref = mandelbrot_pertubation(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms, self.best_ref)
+            self.pixels = mandelbrot_pertubation(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms)
             self.pixels = np.array(self.pixels, dtype=np.int32)
+        elif self.gpu:
+            self.pixels = self.cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
         else:
             self.pixels = mandelbrot(complex(self.t_left), complex(self.b_right), self.h, self.w, self.iterations)
 

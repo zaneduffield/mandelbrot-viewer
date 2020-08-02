@@ -1,5 +1,7 @@
+import cProfile
 import os
 import argparse
+import pstats
 import sys
 import math
 import numpy as np
@@ -7,7 +9,6 @@ import time
 import random
 from tkinter import *
 from PIL import Image, ImageTk
-from numba import njit
 
 from complex_bf import ComplexBf
 from mandelbrot import Mandelbrot
@@ -20,13 +21,15 @@ REF_COLOUR = (255, 0, 0)
 
 class Framework(Frame):
     def __init__(self, parent, height, width, t_left: ComplexBf, b_right: ComplexBf, iterations=None, save=False,
-                 use_multiprocessing: bool = True, pertubations: bool = False, palette_length: int = 300,
+                 use_multiprocessing: bool = True, use_gpu: bool = False, pertubations: bool = False,
+                 palette_length: int = 300,
                  num_probes: int = 100,
-                 num_series_terms: int = 5):
+                 num_series_terms: int = 15):
         Frame.__init__(self, parent)
         self.parent = parent
         self.parent.title("Mandelbrot")
 
+        # width = height
         self.canvasW, self.canvasH = width, height
         self.palette_length = palette_length
 
@@ -34,6 +37,8 @@ class Framework(Frame):
         self.multiprocessing.set(use_multiprocessing)
         self.pertubations = BooleanVar()
         self.pertubations.set(pertubations)
+        self.gpu = BooleanVar()
+        self.gpu.set(use_gpu)
         self.init_iterations = iterations
 
         self.start_click = None
@@ -62,12 +67,6 @@ class Framework(Frame):
         check_pertubations = Checkbutton(pertubation_controls, text="use pertubations", variable=self.pertubations,
                                          command=self.set_pertubations)
 
-        Label(pertubation_controls, text="Num probes", height=1).pack(side=LEFT)
-        self.num_probes = StringVar(value=num_probes)
-        probes_entry = Entry(pertubation_controls, textvariable=self.num_probes, width=4)
-        probes_entry.bind('<Return>', self.on_probes_submit)
-        probes_entry.pack(side=LEFT)
-
         Label(pertubation_controls, text="Num series terms", height=1).pack(side=LEFT)
         self.num_terms = StringVar(value=num_series_terms)
         series_entry = Entry(pertubation_controls, textvariable=self.num_terms, width=3)
@@ -76,6 +75,9 @@ class Framework(Frame):
 
         self.check_multiprocessing = Checkbutton(r_controls, text="use multiprocessing", variable=self.multiprocessing,
                                                  command=self.set_multiprocessing)
+
+        self.check_gpu = Checkbutton(r_controls, text="use gpu", variable=self.gpu, command=self.set_gpu)
+
         back = Button(r_controls, command=self.go_back, text="go back")
         colour = Button(r_controls, command=self.recolour, text="recolour")
         reset = Button(r_controls, command=self.reset, text="reset")
@@ -86,6 +88,7 @@ class Framework(Frame):
         colour.pack(side=RIGHT)
         check_pertubations.pack(side=RIGHT)
         self.check_multiprocessing.pack(side=RIGHT)
+        self.check_gpu.pack(side=RIGHT)
 
         self.pack(fill=BOTH, expand=1)
         self.canvas = Canvas(self)
@@ -95,7 +98,7 @@ class Framework(Frame):
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
 
         self.fractal = Mandelbrot(t_left=t_left, b_right=b_right, iterations=iterations, width=width, height=height,
-                                  multiprocessing=self.multiprocessing.get(), pertubations=pertubations,
+                                  multiprocessing=self.multiprocessing.get(), gpu=self.gpu.get(), pertubations=pertubations,
                                   num_probes=num_probes, num_series_terms=num_series_terms)
         self.image_stack = []
         self.computed_cur_img = True
@@ -108,10 +111,10 @@ class Framework(Frame):
 
     def copy_coords(self):
         self.parent.clipboard_clear()
-        self.parent.clipboard_append(f'-tlr " {float(self.fractal.t_left.real)}" '
-                                     f'-tli " {float(self.fractal.t_left.imag)}" '
-                                     f'-bri " {float(self.fractal.b_right.imag)}" '
-                                     f'-brr " {float(self.fractal.b_right.real)}" '
+        self.parent.clipboard_append(f'-tlr " {self.fractal.t_left.real}" '
+                                     f'-tli " {self.fractal.t_left.imag}" '
+                                     f'-bri " {self.fractal.b_right.imag}" '
+                                     f'-brr " {self.fractal.b_right.real}" '
                                      f'-i {self.fractal.iterations}')
         self.parent.update()
 
@@ -120,6 +123,11 @@ class Framework(Frame):
 
     def set_multiprocessing(self):
         self.fractal.multiprocessing = self.multiprocessing.get()
+
+    def set_gpu(self):
+        self.fractal.set_gpu(self.gpu.get())
+        self.pertubations.set(False)
+        self.set_pertubations()
 
     def recolour(self):
         self.change_palette()
@@ -131,7 +139,6 @@ class Framework(Frame):
     def update_text_fields(self):
         self.iterations.set(self.fractal.iterations)
         self.num_terms.set(self.fractal.num_series_terms)
-        self.num_probes.set(self.fractal.num_probes)
 
     def reset(self):
         self.fractal.reset()
@@ -164,10 +171,6 @@ class Framework(Frame):
 
     def on_series_submit(self, event):
         self.fractal.num_series_terms = int(self.num_terms.get())
-        self.compute_and_draw()
-
-    def on_probes_submit(self, event):
-        self.fractal.num_probes = int(self.num_probes.get())
         self.compute_and_draw()
 
     def on_button_press(self, event):
@@ -211,7 +214,7 @@ class Framework(Frame):
 
     def set_palette(self):
         iterations = self.fractal.iterations
-        self.palette_length = iterations // 4
+        self.palette_length = iterations // 2
 
         redb = 2 * math.pi / (self.red_rand_b * (self.palette_length // 2) + self.palette_length // 2)
         redc = 256 * self.red_rand_c
@@ -261,8 +264,10 @@ def clamp(x):
 
 def main():
     master = Tk()
-    height = round(master.winfo_screenheight() * 0.6)
-    width = round(master.winfo_screenwidth() * 0.7)
+    # height = round(master.winfo_screenheight() * 0.6)
+    # width = round(master.winfo_screenwidth() * 0.35)
+    height = 1000
+    width = 1000
     parser = argparse.ArgumentParser(description='Generate the Mandelbrot set')
     parser.add_argument('-i', '--iterations', type=int, help='The number of iterations done for each pixel.',
                         default=500)
@@ -283,7 +288,6 @@ def main():
 
     t_left = ComplexBf(BigFloat(args.top_left_real), BigFloat(args.top_left_imag))
     b_right = ComplexBf(BigFloat(args.bottom_right_real), BigFloat(args.bottom_right_imag))
-    print(t_left, b_right)
     render = Framework(parent=master, height=height, width=width, use_multiprocessing=args.no_multiprocessing,
                        t_left=t_left, b_right=b_right, iterations=args.iterations, save=args.save)
 
@@ -292,4 +296,10 @@ def main():
 
 
 if __name__ == "__main__":
+
+    # profile = cProfile.Profile()
+    # profile.runcall(main)
+    # ps = pstats.Stats(profile)
+    # ps.sort_stats("cumtime")
+    # ps.print_stats(30)
     main()

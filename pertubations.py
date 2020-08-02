@@ -1,21 +1,42 @@
 import math
 import random
+from timeit import timeit
 from typing import List
 
 import numpy as np
-from numba import jit, jitclass, njit, prange, gdb
-from numba import int32, float32, float64, complex128, int64
-from bigfloat import BigFloat, Context, setcontext
+from numba import njit, prange, float64, complex128, int64
+from numba.experimental import jitclass
+from bigfloat import BigFloat
 from complex_bf import ComplexBf
 from mandelbrot import BREAKOUT_R_2
 BREAKOUT_R = math.sqrt(BREAKOUT_R_2)
-ERROR_THRESH = 0.00001
+ERROR_THRESH = 0.0001
 GLITCH_ITER = -1
 
 
-# @njit
-def _iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int):
+def iterate_ref(ref: ComplexBf, iterations):
+    ref_hist = np.zeros(iterations, dtype=np.complex_)
+    ref_hist_abs = np.zeros(iterations, dtype=np.float64)
+    ref_curr = ref
+    for i in range(iterations):
+        if ref_curr.abs_2() > BREAKOUT_R_2:
+            return ref_hist, ref_hist_abs, i
+        temp = complex(ref_curr)
+        ref_hist[i] = temp
+        ref_hist_abs[i] = abs(temp)
+        ref_curr = ref_curr*ref_curr + ref
+
+    return ref_hist, ref_hist_abs, iterations
+
+
+@njit
+def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int):
     probe_deltas_cur = probe_deltas_init.copy()
+    probe_deltas_scale = 0
+    for p in probe_deltas_init:
+        if abs(p) > probe_deltas_scale:
+            probe_deltas_scale = abs(p)
+
     terms[0][0] = 1
     for i in range(1, num_terms):
         terms[i][0] = 0
@@ -43,55 +64,40 @@ def _iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, 
                     break
                 z_del_app += term * delta
                 delta *= probe_deltas_init[j]
-            if abs(probe_deltas_cur[j] - z_del_app) > ERROR_THRESH:
+            if abs(probe_deltas_cur[j] - z_del_app) / abs(z_del_app) > ERROR_THRESH:
                 return i
 
     return ref_escaped_at
 
 
-def iterate_ref(ref: ComplexBf, iterations):
-    ref_hist = np.zeros(iterations, dtype=np.complex_)
-    ref_hist_abs = np.zeros(iterations, dtype=np.float64)
-    ref_curr = ref
-    for i in range(iterations):
-        if ref_curr.abs_2() > BREAKOUT_R_2:
-            return ref_hist, ref_hist_abs, i
-        temp = complex(ref_curr)
-        ref_hist[i] = temp
-        ref_hist_abs[i] = abs(temp)
-        ref_curr = ref_curr*ref_curr + ref
-
-    return ref_hist, ref_hist_abs, iterations
-
-
-def compute_series_constants(t_left: ComplexBf, b_right: ComplexBf, ref_init: ComplexBf, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
+def get_probe_deltas(t_left: ComplexBf, b_right: ComplexBf, ref_init: ComplexBf, num_probes):
     probes = []
     square_side_len = int(math.sqrt(num_probes))
     for i in range(square_side_len):
         for j in range(square_side_len):
-            x_ratio, y_ratio = i/square_side_len, j/square_side_len
-            probe_del = ComplexBf(BigFloat(x_ratio*(b_right.real - t_left.real)), BigFloat(-y_ratio*(t_left.imag - b_right.imag)))
+            x_ratio, y_ratio = i / square_side_len, j / square_side_len
+            probe_del = ComplexBf(BigFloat(x_ratio * (b_right.real - t_left.real)),
+                                  BigFloat(-y_ratio * (t_left.imag - b_right.imag)))
             probes.append(t_left + probe_del)
 
+    return np.array([complex(p - ref_init) for p in probes])
+
+
+def compute_series_constants(t_left: ComplexBf, b_right: ComplexBf, ref_init: ComplexBf, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
+    p_deltas_init = get_probe_deltas(t_left, b_right, ref_init, num_probes)
     terms = np.zeros((num_terms, iterations + 1), dtype=np.complex_, order="F")
-    p_deltas_init = np.array([complex(p - ref_init) for p in probes])
-    accurate_iters = _iterate_series_constants(ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms)
+    accurate_iters = iterate_series_constants(ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms)
     return terms, accurate_iters
 
 
 MAX_GLITCH_FIX_LOOPS = 5
 NUM_RANDOM_REFS_DESPARATE = 15
-MAX_GLITCH_COUNT = 10
-def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width, iterations, num_probes, num_series_terms, init_ref):
+MAX_GLITCH_COUNT = 100
+def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width, iterations, num_probes, num_series_terms):
     width_per_pixel = float((b_right.real - t_left.real)/width)
     height_per_pixel = float((t_left.imag - b_right.imag)/height)
     iterations_grid = np.zeros((height, width), dtype=np.int32)
-    # if init_ref is None:
     ref_coords = width//2, height//2
-    # else:
-    #     diag = b_right - t_left
-    #     ref_diag = init_ref - t_left
-    #     ref_coords = round(float(width*(ref_diag.real/diag.real))), round(float((height*(ref_diag.imag/diag.imag))))
     prev_refs = []
     num_prev_refs = 0
     loops = 0
@@ -116,58 +122,23 @@ def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width,
             width_per_pixel, width, height_per_pixel, height, np.array(ref_coords, dtype=np.int64), terms, num_series_terms,
             ref_escaped_at, ref_hist, ref_hist_abs, iter_accurate, iterations
         )
-        if not loops:
-            glitched_count = approximate_pixels(pertubation_computer, iterations_grid, fix_glitches=False)
-        else:
-            glitched_count = approximate_pixels(pertubation_computer, iterations_grid, fix_glitches=True)
+        glitched_count = approximate_pixels(pertubation_computer, iterations_grid, fix_glitches=loops)
         print(f"{glitched_count} glitched pixels remaining")
         if glitched_count <= MAX_GLITCH_COUNT:
             break
-        if glitched_count:
-            if glitched_count > 0.4 * height * width:
-                print("iterating multiple reference and choosing best")
-                best_iters = 0
-                for _ in range(NUM_RANDOM_REFS_DESPARATE):
-                    coords = random.randint(0, width - 1), random.randint(0, height - 1)
-                    test_ref = _ref_from_coords(coords)
-                    if coords in prev_refs:
-                        continue
-                    _, _, ref_escaped_at = iterate_ref(test_ref, iterations)
-                    if ref_escaped_at > best_iters:
-                        ref_coords = coords
-                        best_iters = ref_escaped_at
 
-            else:
-                # ref_coords = get_random_new_ref(iterations_grid, width, height, glitched_count)
-                ref_coords = get_new_ref(iterations_grid, width, height, np.array(prev_refs), num_prev_refs, GLITCH_ITER)
-            if ref_coords is None:
-                ref_coords = random.randint(0, width), random.randint(0, height)
-            print(f"new ref at :{ref_coords}")
+        ref_coords = get_new_ref(iterations_grid, width, height, np.array(prev_refs), num_prev_refs, GLITCH_ITER)
+        if ref_coords is None:
+            ref_coords = random.randint(0, width), random.randint(0, height)
+        print(f"new ref at :{ref_coords}")
         loops += 1
 
-    for x in prev_refs[1:]:
-        try:
-            iterations_grid[x[1], x[0]] = iterations + 1
-        except IndexError:
-            print("debug here")
+    # # to see the reference pixels in the image
+    # for x in prev_refs[1:]:
+    #     iterations_grid[x[1], x[0]] = iterations + 1
 
-    # TODO: fix
-    ref_coords = get_coord_max_iter(iterations_grid, width, height)
-    next_ref = _ref_from_coords(ref_coords)
-    return iterations_grid, next_ref
+    return iterations_grid
 
-@njit
-def get_coord_max_iter(iterations_grid, width, height):
-    best_coords, best_iters = None, 0
-    for j in range(height):
-        for i in range(width):
-            cur_iter = iterations_grid[j, i]
-            if cur_iter == 0:
-                return i, j
-            if cur_iter > best_iters:
-                best_coords = i, j
-                best_iters = cur_iter
-    return best_coords
 
 @njit
 def get_random_new_ref(iterations_grid, width, height, glitched_count):
@@ -179,7 +150,7 @@ def get_random_new_ref(iterations_grid, width, height, glitched_count):
                     return i, j
                 x -= 1
 
-EXCLUDE_RADIUS_2 = 1**2
+EXCLUDE_RADIUS_2 = 1
 @njit
 def get_new_ref(iterations_grid, width, height, exclude_refs, num_exclude_refs, blob_iter):
     # store the number of contiguous pixels with blob_iter above and below each position in the grid
