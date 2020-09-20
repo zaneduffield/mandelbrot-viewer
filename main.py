@@ -21,9 +21,9 @@ REF_COLOUR = (255, 0, 0)
 
 class Framework(Frame):
     def __init__(self, parent, height, width, t_left: ComplexBf, b_right: ComplexBf, iterations=None, save=False,
-                 use_multiprocessing: bool = True, use_gpu: bool = False, pertubations: bool = False,
+                 use_multiprocessing: bool = True, use_gpu: bool = True, pertubations: bool = False,
                  palette_length: int = 300,
-                 num_probes: int = 100,
+                 num_probes: int = 9,
                  num_series_terms: int = 15):
         Frame.__init__(self, parent)
         self.parent = parent
@@ -267,7 +267,7 @@ def main():
     # height = round(master.winfo_screenheight() * 0.6)
     # width = round(master.winfo_screenwidth() * 0.35)
     height = 1000
-    width = 1000
+    width = 1500
     parser = argparse.ArgumentParser(description='Generate the Mandelbrot set')
     parser.add_argument('-i', '--iterations', type=int, help='The number of iterations done for each pixel.',
                         default=500)

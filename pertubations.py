@@ -10,20 +10,22 @@ from bigfloat import BigFloat
 from complex_bf import ComplexBf
 from mandelbrot import BREAKOUT_R_2
 BREAKOUT_R = math.sqrt(BREAKOUT_R_2)
-ERROR_THRESH = 0.0001
+ERROR_THRESH = 0.01
 GLITCH_ITER = -1
 
 
 def iterate_ref(ref: ComplexBf, iterations):
-    ref_hist = np.zeros(iterations, dtype=np.complex_)
-    ref_hist_abs = np.zeros(iterations, dtype=np.float64)
+    ref_hist = np.empty(iterations, dtype=np.complex_)
+    ref_hist_abs = np.empty(iterations, dtype=np.float64)
     ref_curr = ref
     for i in range(iterations):
-        if ref_curr.abs_2() > BREAKOUT_R_2:
-            return ref_hist, ref_hist_abs, i
         temp = complex(ref_curr)
+        temp_abs = abs(temp)
+        if temp_abs > BREAKOUT_R_2:
+            return ref_hist, ref_hist_abs, i
+
         ref_hist[i] = temp
-        ref_hist_abs[i] = abs(temp)
+        ref_hist_abs[i] = temp_abs
         ref_curr = ref_curr*ref_curr + ref
 
     return ref_hist, ref_hist_abs, iterations

@@ -2,6 +2,8 @@ import pyopencl as cl
 import numpy as np
 from complex_bf import ComplexBf
 
+# import os
+# os.environ["PYOPENCL_COMPILER_OUTPUT"] = "1"
 
 def readProgram(filename, ctx):
     lines = open(filename, 'r').read()
@@ -19,27 +21,24 @@ class MandelbrotCL:
         self.ctx = cl.create_some_context(interactive=False)
         self.prg = readProgram("mandelbrot.cl", self.ctx)
         self.queue = cl.CommandQueue(self.ctx)
-        self.a, self.abuf = self.set_arrays()
+        self.length = 0
 
-    def set_arrays(self):
-        self.a = np.ascontiguousarray(np.zeros((self.width, self.height), dtype=np.int32))
+    def set_arrays(self, length):
+        self.length = length
+        self.a = np.zeros((length, length), dtype=np.uint16, order="C")
         self.abuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.a.nbytes)
-        # return and assign to avoid pycharm complaints
-        return self.a, self.abuf
 
     def get_pixels(self, t_left: ComplexBf, b_right: ComplexBf, height, width, iterations):
-        if height != self.height or width != self.width:
-            self.width, self.height = np.int32(width), np.int32(height)
-            self.set_arrays()
+        if self.length != max(height, width):
+            self.length = max(height, width)
+            self.set_arrays(self.length)
 
-        center_x = float((b_right.real + t_left.real)/2)
-        center_y = float((b_right.imag + t_left.imag)/2)
         width_per_pix = float((b_right.real - t_left.real) / width)
-        zoom = 1/width_per_pix
-        self.prg.pixel64(self.queue, self.a.shape, None, self.abuf, np.float64(center_x), np.float64(center_y),
-                         np.float32(zoom), np.int32(iterations), np.float32(0), np.float32(0), np.int32(self.width), np.int32(self.height))
+        self.prg.pixel64(self.queue, self.a.shape, None, self.abuf, np.float64(t_left.real), np.float64(t_left.imag),
+                         np.float64(width_per_pix), np.int32(iterations), np.float32(0), np.float32(0), np.int32(self.length), np.int32(self.length))
         cl.enqueue_copy(self.queue, self.a, self.abuf).wait()
-        return np.reshape(self.a, (self.width, self.height))
+        # return np.reshape(self.a, (self.width, self.height), order="C")
+        return self.a[:height, :width]
 
     def __del__(self):
         self.abuf.release()

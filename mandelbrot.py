@@ -121,6 +121,7 @@ class Mandelbrot:
             self.pixels = mandelbrot(complex(self.t_left), complex(self.b_right), self.h, self.w, self.iterations)
 
 
+
 def translate(value, leftMin, leftMax, rightMin, rightMax):
     leftSpan = leftMax - leftMin
     rightSpan = rightMax - rightMin
