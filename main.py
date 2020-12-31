@@ -10,9 +10,8 @@ import random
 from tkinter import *
 from PIL import Image, ImageTk
 
-from complex_bf import ComplexBf
 from mandelbrot import Mandelbrot
-from bigfloat import BigFloat, Context, setcontext
+from gmpy2 import mpc, get_context
 
 GLITCH_COLOUR = (255, 255, 255)
 BROT_COLOUR = (0, 0, 0)
@@ -20,23 +19,22 @@ REF_COLOUR = (255, 0, 0)
 
 
 class Framework(Frame):
-    def __init__(self, parent, height, width, t_left: ComplexBf, b_right: ComplexBf, iterations=None, save=False,
-                 use_multiprocessing: bool = True, use_gpu: bool = True, pertubations: bool = False,
+    def __init__(self, parent, height, width, t_left: mpc, b_right: mpc, iterations=None, save=False,
+                 use_multiprocessing: bool = True, use_gpu: bool = False, perturbation: bool = False,
                  palette_length: int = 300,
                  num_probes: int = 9,
-                 num_series_terms: int = 15):
+                 num_series_terms: int = 5):
         Frame.__init__(self, parent)
         self.parent = parent
         self.parent.title("Mandelbrot")
 
-        # width = height
         self.canvasW, self.canvasH = width, height
         self.palette_length = palette_length
 
         self.multiprocessing = BooleanVar()
         self.multiprocessing.set(use_multiprocessing)
-        self.pertubations = BooleanVar()
-        self.pertubations.set(pertubations)
+        self.perturbation = BooleanVar()
+        self.perturbation.set(perturbation)
         self.gpu = BooleanVar()
         self.gpu.set(use_gpu)
         self.init_iterations = iterations
@@ -64,7 +62,7 @@ class Framework(Frame):
         iter_entry.bind('<Return>', self.on_iter_submit)
         iter_entry.pack(side=LEFT)
 
-        check_pertubations = Checkbutton(pertubation_controls, text="use pertubations", variable=self.pertubations,
+        check_pertubations = Checkbutton(pertubation_controls, text="use pertubations", variable=self.perturbation,
                                          command=self.set_pertubations)
 
         Label(pertubation_controls, text="Num series terms", height=1).pack(side=LEFT)
@@ -98,7 +96,7 @@ class Framework(Frame):
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
 
         self.fractal = Mandelbrot(t_left=t_left, b_right=b_right, iterations=iterations, width=width, height=height,
-                                  multiprocessing=self.multiprocessing.get(), gpu=self.gpu.get(), pertubations=pertubations,
+                                  multiprocessing=self.multiprocessing.get(), gpu=self.gpu.get(), perturbations=perturbation,
                                   num_probes=num_probes, num_series_terms=num_series_terms)
         self.image_stack = []
         self.computed_cur_img = True
@@ -116,17 +114,19 @@ class Framework(Frame):
                                      f'-bri " {self.fractal.b_right.imag}" '
                                      f'-brr " {self.fractal.b_right.real}" '
                                      f'-i {self.fractal.iterations}')
+        if self.fractal.perturbations:
+            self.parent.clipboard_append(" -p")
         self.parent.update()
 
     def set_pertubations(self):
-        self.fractal.pertubations = self.pertubations.get()
+        self.fractal.perturbations = self.perturbation.get()
 
     def set_multiprocessing(self):
         self.fractal.multiprocessing = self.multiprocessing.get()
 
     def set_gpu(self):
         self.fractal.set_gpu(self.gpu.get())
-        self.pertubations.set(False)
+        self.perturbation.set(False)
         self.set_pertubations()
 
     def recolour(self):
@@ -264,10 +264,8 @@ def clamp(x):
 
 def main():
     master = Tk()
-    # height = round(master.winfo_screenheight() * 0.6)
-    # width = round(master.winfo_screenwidth() * 0.35)
-    height = 1000
-    width = 1500
+    height = round(master.winfo_screenheight() * 0.6)
+    width = round(master.winfo_screenwidth() * 0.7)
     parser = argparse.ArgumentParser(description='Generate the Mandelbrot set')
     parser.add_argument('-i', '--iterations', type=int, help='The number of iterations done for each pixel.',
                         default=500)
@@ -282,14 +280,16 @@ def main():
     parser.add_argument('-w', '--width', type=int, help='The width of the image.')
     parser.add_argument('-s', '--save', action='store_true', help='Save the generated image.')
     parser.add_argument('-nm', '--no-multiprocessing', action='store_false', help="Don't use multiprocessing.")
+    parser.add_argument('-p', '--perturbation', action='store_true', help="Use perturbation theory for high precision "
+                                                                           "computation.")
     args = parser.parse_args()
 
-    setcontext(Context(precision=200))
+    get_context().precision =100
 
-    t_left = ComplexBf(BigFloat(args.top_left_real), BigFloat(args.top_left_imag))
-    b_right = ComplexBf(BigFloat(args.bottom_right_real), BigFloat(args.bottom_right_imag))
+    t_left = mpc(f"({args.top_left_real} {args.top_left_imag})")
+    b_right = mpc(f"({args.bottom_right_real} {args.bottom_right_imag})")
     render = Framework(parent=master, height=height, width=width, use_multiprocessing=args.no_multiprocessing,
-                       t_left=t_left, b_right=b_right, iterations=args.iterations, save=args.save)
+                       t_left=t_left, b_right=b_right, iterations=args.iterations, save=args.save, perturbation=args.perturbation)
 
     master.geometry("{}x{}".format(render.canvasW, render.canvasH))
     master.mainloop()

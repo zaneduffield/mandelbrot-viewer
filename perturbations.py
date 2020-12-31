@@ -4,17 +4,15 @@ from timeit import timeit
 from typing import List
 
 import numpy as np
-from numba import njit, prange, float64, complex128, int64
-from numba.experimental import jitclass
-from bigfloat import BigFloat
-from complex_bf import ComplexBf
+from numba import njit, prange, float64, complex128, int64, jitclass
 from mandelbrot import BREAKOUT_R_2
+from gmpy2 import mpc
 BREAKOUT_R = math.sqrt(BREAKOUT_R_2)
-ERROR_THRESH = 0.01
+ERROR_THRESH = 0.00000001
 GLITCH_ITER = -1
 
 
-def iterate_ref(ref: ComplexBf, iterations):
+def iterate_ref(ref: mpc, iterations):
     ref_hist = np.empty(iterations, dtype=np.complex_)
     ref_hist_abs = np.empty(iterations, dtype=np.float64)
     ref_curr = ref
@@ -34,10 +32,6 @@ def iterate_ref(ref: ComplexBf, iterations):
 @njit
 def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int):
     probe_deltas_cur = probe_deltas_init.copy()
-    probe_deltas_scale = 0
-    for p in probe_deltas_init:
-        if abs(p) > probe_deltas_scale:
-            probe_deltas_scale = abs(p)
 
     terms[0][0] = 1
     for i in range(1, num_terms):
@@ -55,7 +49,7 @@ def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, t
             terms[j][i + 1] = 2 * z_comp * terms[j][i] + s
 
         for j in range(len(probe_deltas_init)):
-            delta = probe_deltas_cur[j]
+            delta = mpc(probe_deltas_cur[j], precision=200)
             probe_deltas_cur[j] = 2 * z_comp * delta + delta * delta + probe_deltas_init[j]
 
             z_del_app = 0
@@ -66,26 +60,25 @@ def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, t
                     break
                 z_del_app += term * delta
                 delta *= probe_deltas_init[j]
-            if abs(probe_deltas_cur[j] - z_del_app) / abs(z_del_app) > ERROR_THRESH:
+            if abs(probe_deltas_cur[j] - z_del_app) > ERROR_THRESH:
                 return i
 
     return ref_escaped_at
 
 
-def get_probe_deltas(t_left: ComplexBf, b_right: ComplexBf, ref_init: ComplexBf, num_probes):
+def get_probe_deltas(t_left: mpc, b_right: mpc, ref_init: mpc, num_probes):
     probes = []
     square_side_len = int(math.sqrt(num_probes))
     for i in range(square_side_len):
         for j in range(square_side_len):
             x_ratio, y_ratio = i / square_side_len, j / square_side_len
-            probe_del = ComplexBf(BigFloat(x_ratio * (b_right.real - t_left.real)),
-                                  BigFloat(-y_ratio * (t_left.imag - b_right.imag)))
-            probes.append(t_left + probe_del)
+            probe_del = mpc(x_ratio * (b_right.real - t_left.real) - y_ratio * (t_left.imag - b_right.imag)*1j)
+            probes.append(t_left + probe_del - ref_init)
 
-    return np.array([complex(p - ref_init) for p in probes])
+    return probes
 
 
-def compute_series_constants(t_left: ComplexBf, b_right: ComplexBf, ref_init: ComplexBf, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
+def compute_series_constants(t_left: mpc, b_right: mpc, ref_init: mpc, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
     p_deltas_init = get_probe_deltas(t_left, b_right, ref_init, num_probes)
     terms = np.zeros((num_terms, iterations + 1), dtype=np.complex_, order="F")
     accurate_iters = iterate_series_constants(ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms)
@@ -93,19 +86,24 @@ def compute_series_constants(t_left: ComplexBf, b_right: ComplexBf, ref_init: Co
 
 
 MAX_GLITCH_FIX_LOOPS = 5
-NUM_RANDOM_REFS_DESPARATE = 15
-MAX_GLITCH_COUNT = 100
-def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width, iterations, num_probes, num_series_terms):
+NUM_RANDOM_REFS_DESPERATE = 15
+MAX_OK_GLITCH_COUNT = 50
+def mandelbrot_perturbation(t_left: mpc, b_right: mpc, height, width, iterations, num_probes, num_series_terms, init_ref=None):
     width_per_pixel = float((b_right.real - t_left.real)/width)
     height_per_pixel = float((t_left.imag - b_right.imag)/height)
     iterations_grid = np.zeros((height, width), dtype=np.int32)
-    ref_coords = width//2, height//2
+    if init_ref is None:
+        ref_coords = width//2, height//2
+    else:
+        diag = b_right - t_left
+        ref_diag = init_ref - t_left
+        ref_coords = round(float(width*(ref_diag.real/diag.real))), round(float((height*(ref_diag.imag/diag.imag))))
     prev_refs = []
     num_prev_refs = 0
     loops = 0
 
     def _ref_from_coords(coords):
-        return ComplexBf(t_left.real + coords[0]*width_per_pixel, t_left.imag - coords[1]*height_per_pixel)
+        return t_left + mpc(coords[0]*width_per_pixel - coords[1]*height_per_pixel*1j)
 
     while loops <= MAX_GLITCH_FIX_LOOPS:
         prev_refs.append(ref_coords)
@@ -126,7 +124,7 @@ def mandelbrot_pertubation(t_left: ComplexBf, b_right: ComplexBf, height, width,
         )
         glitched_count = approximate_pixels(pertubation_computer, iterations_grid, fix_glitches=loops)
         print(f"{glitched_count} glitched pixels remaining")
-        if glitched_count <= MAX_GLITCH_COUNT:
+        if glitched_count <= MAX_OK_GLITCH_COUNT:
             break
 
         ref_coords = get_new_ref(iterations_grid, width, height, np.array(prev_refs), num_prev_refs, GLITCH_ITER)

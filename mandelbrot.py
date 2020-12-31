@@ -3,14 +3,12 @@ import random
 from typing import List
 
 import numpy as np
-from numba import jit, jitclass, njit, prange
-from numba import int32, float32, float64, complex128, int64
-from bigfloat import BigFloat, Context, setcontext
-from complex_bf import ComplexBf
-from opencl_test import MandelbrotCL
+from numba import njit, prange
+from gmpy2 import mpc, get_context
+# from opencl_test import MandelbrotCL
 
 BREAKOUT_R_2 = 20
-from pertubations import mandelbrot_pertubation, get_new_ref
+from perturbations import mandelbrot_perturbation, get_new_ref
 
 
 @njit(fastmath=True, parallel=True, nogil=True)
@@ -41,8 +39,8 @@ def mandelbrot(t_left, b_right, height, width, iters):
 
 
 class Mandelbrot:
-    def __init__(self, width: int, height: int, t_left: ComplexBf, b_right: ComplexBf, iterations: int,
-                 multiprocessing: bool, gpu: bool, pertubations: bool, num_series_terms, num_probes):
+    def __init__(self, width: int, height: int, t_left: mpc, b_right: mpc, iterations: int,
+                 multiprocessing: bool, gpu: bool, perturbations: bool, num_series_terms, num_probes):
         self.w = width
         self.h = height
         self.corners_stack = []
@@ -52,7 +50,8 @@ class Mandelbrot:
         self.iterations = iterations
         self.multiprocessing = multiprocessing
 
-        self.pertubations = pertubations
+        self.perturbations = perturbations
+        self.best_ref = None
         self.num_series_terms = num_series_terms
         self.num_probes = num_probes
 
@@ -68,8 +67,8 @@ class Mandelbrot:
 
     def set_gpu(self, gpu: bool):
         self.gpu = gpu
-        if self.gpu and self.cl is None:
-            self.cl = MandelbrotCL(self.w, self.h)
+        # if self.gpu and self.cl is None:
+        #     self.cl = MandelbrotCL(self.w, self.h)
 
     def pop_corners(self):
         if not self.corners_stack:
@@ -83,26 +82,26 @@ class Mandelbrot:
         hor_scale = (b.real - t.real)/self.w
         ver_scale = (t.imag - b.imag)/self.h
 
-        t_left = ComplexBf(t.real + hor_scale*t_left_coords[0], t.imag - ver_scale*t_left_coords[1])
-        b_right = ComplexBf(t.real + hor_scale*b_right_coords[0], t.imag - ver_scale*b_right_coords[1])
+        t_left = t + mpc(hor_scale*t_left_coords[0] - ver_scale*t_left_coords[1]*1j)
+        b_right = t + mpc(hor_scale*b_right_coords[0] - ver_scale*b_right_coords[1]*1j)
 
         self.corners_stack.append((self.t_left, self.b_right))
         self._set_corners(t_left, b_right)
 
-    def _set_corners(self, t_left: ComplexBf, b_right: ComplexBf):
+    def _set_corners(self, t_left: mpc, b_right: mpc):
         height = t_left.imag - b_right.imag
         width = b_right.real - t_left.real
-        setcontext(context=Context(precision=200))
+        get_context().precision = 100
 
         ratio_target = self.h/self.w
         ratio_curr = height/width
 
         if ratio_target > ratio_curr:
-            diff = BigFloat((width * ratio_target - height)/2)
+            diff = (width * ratio_target - height)/2
             t_left.imag += diff
             b_right.imag -= diff
         else:
-            diff = BigFloat((height / ratio_target - width) / 2)
+            diff = (height / ratio_target - width) / 2
             t_left -= diff
             b_right += diff
 
@@ -112,11 +111,11 @@ class Mandelbrot:
         return float(self.b_right.real - self.t_left.real)
 
     def get_pixels(self):
-        if self.pertubations:
-            self.pixels = mandelbrot_pertubation(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms)
+        if self.perturbations:
+            self.pixels = mandelbrot_perturbation(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms)
             self.pixels = np.array(self.pixels, dtype=np.int32)
-        elif self.gpu:
-            self.pixels = self.cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
+        # elif self.gpu:
+        #     self.pixels = self.cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
         else:
             self.pixels = mandelbrot(complex(self.t_left), complex(self.b_right), self.h, self.w, self.iterations)
 
