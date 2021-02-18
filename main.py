@@ -22,8 +22,8 @@ class Framework(Frame):
     def __init__(self, parent, height, width, t_left: mpc, b_right: mpc, iterations=None, save=False,
                  use_multiprocessing: bool = True, use_gpu: bool = False, perturbation: bool = False,
                  palette_length: int = 300,
-                 num_probes: int = 9,
-                 num_series_terms: int = 5):
+                 num_probes: int = 4,
+                 num_series_terms: int = 7):
         Frame.__init__(self, parent)
         self.parent = parent
         self.parent.title("Mandelbrot")
@@ -62,19 +62,13 @@ class Framework(Frame):
         iter_entry.bind('<Return>', self.on_iter_submit)
         iter_entry.pack(side=LEFT)
 
-        check_pertubations = Checkbutton(pertubation_controls, text="use pertubations", variable=self.perturbation,
+        check_pertubations = Checkbutton(pertubation_controls, text="high precision", variable=self.perturbation,
                                          command=self.set_pertubations)
 
-        Label(pertubation_controls, text="Num series terms", height=1).pack(side=LEFT)
-        self.num_terms = StringVar(value=num_series_terms)
-        series_entry = Entry(pertubation_controls, textvariable=self.num_terms, width=3)
-        series_entry.bind('<Return>', self.on_series_submit)
-        series_entry.pack(side=LEFT)
-
-        self.check_multiprocessing = Checkbutton(r_controls, text="use multiprocessing", variable=self.multiprocessing,
+        self.check_multiprocessing = Checkbutton(r_controls, text="multiprocessing", variable=self.multiprocessing,
                                                  command=self.set_multiprocessing)
 
-        self.check_gpu = Checkbutton(r_controls, text="use gpu", variable=self.gpu, command=self.set_gpu)
+        self.check_gpu = Checkbutton(r_controls, text="gpu", variable=self.gpu, command=self.set_gpu)
 
         back = Button(r_controls, command=self.go_back, text="go back")
         colour = Button(r_controls, command=self.recolour, text="recolour")
@@ -109,10 +103,10 @@ class Framework(Frame):
 
     def copy_coords(self):
         self.parent.clipboard_clear()
-        self.parent.clipboard_append(f'-tlr " {self.fractal.t_left.real}" '
-                                     f'-tli " {self.fractal.t_left.imag}" '
-                                     f'-bri " {self.fractal.b_right.imag}" '
-                                     f'-brr " {self.fractal.b_right.real}" '
+        self.parent.clipboard_append(f'-tlr " {str(self.fractal.t_left.real)}" '
+                                     f'-tli " {str(self.fractal.t_left.imag)}" '
+                                     f'-bri " {str(self.fractal.b_right.imag)}" '
+                                     f'-brr " {str(self.fractal.b_right.real)}" '
                                      f'-i {self.fractal.iterations}')
         if self.fractal.perturbations:
             self.parent.clipboard_append(" -p")
@@ -138,7 +132,6 @@ class Framework(Frame):
 
     def update_text_fields(self):
         self.iterations.set(self.fractal.iterations)
-        self.num_terms.set(self.fractal.num_series_terms)
 
     def reset(self):
         self.fractal.reset()

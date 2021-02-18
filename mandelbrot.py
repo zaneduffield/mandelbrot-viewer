@@ -98,8 +98,8 @@ class Mandelbrot:
 
         if ratio_target > ratio_curr:
             diff = (width * ratio_target - height)/2
-            t_left.imag += diff
-            b_right.imag -= diff
+            t_left += diff*1j
+            b_right -= diff*1j
         else:
             diff = (height / ratio_target - width) / 2
             t_left -= diff

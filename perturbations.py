@@ -8,7 +8,7 @@ from numba import njit, prange, float64, complex128, int64, jitclass
 from mandelbrot import BREAKOUT_R_2
 from gmpy2 import mpc
 BREAKOUT_R = math.sqrt(BREAKOUT_R_2)
-ERROR_THRESH = 0.00000001
+ERROR_THRESH = 0.000000000000001
 GLITCH_ITER = -1
 
 
@@ -49,7 +49,7 @@ def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, t
             terms[j][i + 1] = 2 * z_comp * terms[j][i] + s
 
         for j in range(len(probe_deltas_init)):
-            delta = mpc(probe_deltas_cur[j], precision=200)
+            delta = probe_deltas_cur[j]
             probe_deltas_cur[j] = 2 * z_comp * delta + delta * delta + probe_deltas_init[j]
 
             z_del_app = 0
@@ -72,10 +72,10 @@ def get_probe_deltas(t_left: mpc, b_right: mpc, ref_init: mpc, num_probes):
     for i in range(square_side_len):
         for j in range(square_side_len):
             x_ratio, y_ratio = i / square_side_len, j / square_side_len
-            probe_del = mpc(x_ratio * (b_right.real - t_left.real) - y_ratio * (t_left.imag - b_right.imag)*1j)
-            probes.append(t_left + probe_del - ref_init)
+            probe_del = x_ratio * (b_right.real - t_left.real) - y_ratio * (t_left.imag - b_right.imag)*1j
+            probes.append(complex(t_left + probe_del - ref_init))
 
-    return probes
+    return np.array(probes)
 
 
 def compute_series_constants(t_left: mpc, b_right: mpc, ref_init: mpc, ref_hist: np.ndarray, ref_escaped_at: int, iterations: int, num_terms, num_probes):
@@ -86,7 +86,6 @@ def compute_series_constants(t_left: mpc, b_right: mpc, ref_init: mpc, ref_hist:
 
 
 MAX_GLITCH_FIX_LOOPS = 5
-NUM_RANDOM_REFS_DESPERATE = 15
 MAX_OK_GLITCH_COUNT = 50
 def mandelbrot_perturbation(t_left: mpc, b_right: mpc, height, width, iterations, num_probes, num_series_terms, init_ref=None):
     width_per_pixel = float((b_right.real - t_left.real)/width)
