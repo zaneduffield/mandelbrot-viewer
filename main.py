@@ -7,6 +7,7 @@ import math
 import numpy as np
 import time
 import random
+import threading
 from tkinter import *
 from PIL import Image, ImageTk
 
@@ -22,7 +23,7 @@ class Framework(Frame):
     def __init__(self, parent, height, width, t_left: mpc, b_right: mpc, iterations=None, save=False,
                  use_multiprocessing: bool = True, use_gpu: bool = False, perturbation: bool = False,
                  palette_length: int = 300,
-                 num_probes: int = 4,
+                 num_probes: int = 100,
                  num_series_terms: int = 7):
         Frame.__init__(self, parent)
         self.parent = parent
@@ -41,6 +42,7 @@ class Framework(Frame):
 
         self.start_click = None
         self.rect = None
+        self.canvas_image = None
 
         ui = Frame(self)
         ui.pack(side=TOP, fill=X)
@@ -137,7 +139,6 @@ class Framework(Frame):
         self.fractal.reset()
 
         # reset variable
-        # TODO: fix resetting of new variables
         if self.fractal.iterations != self.init_iterations:
             self.fractal.iterations = self.init_iterations
             self.set_palette()
@@ -191,18 +192,26 @@ class Framework(Frame):
         self.compute_and_draw()
 
     def compute_and_draw(self):
+        threading.Thread(target=self.threaded_compute_and_draw).start()
+
+    def threaded_compute_and_draw(self):
         print('-' * 20)
         start = time.time()
-        self.fractal.get_pixels()
+        for pixels in self.fractal.get_pixels():
+            self.draw(pixels)
+
         comp_time = time.time()
         print("computation took {} seconds".format(round(comp_time - start, 2)))
-        self.draw()
         self.computed_cur_img = True
 
-    def draw(self):
-        self.draw_pixels()
+    def draw(self, pixels):
+        self.draw_pixels(pixels)
         self.set_mag()
-        self.canvas.create_image(0, 0, image=self.background, anchor=NW)
+        new_image = self.canvas.create_image(0, 0, image=self.background, anchor=NW)
+        if self.canvas_image:
+            self.canvas.delete(self.canvas_image)
+
+        self.canvas_image = new_image
         self.canvas.pack(fill=BOTH, expand=1)
 
     def set_palette(self):
@@ -239,16 +248,15 @@ class Framework(Frame):
         self.generate_palette_variables()
         self.set_palette()
 
-    def draw_pixels(self):
-        img = Image.fromarray(self.palette[self.fractal.pixels], "RGB")
-        self.img = img
+    def draw_pixels(self, pixels):
+        img = Image.fromarray(self.palette[pixels], "RGB")
         if self.save:
-            self.save_image(None)
+            self.save_image(img)
         photoimg = ImageTk.PhotoImage(img.resize((self.canvasW, self.canvasH)))
         self.background = photoimg
 
-    def save_image(self, event):
-        self.img.save("output/{}.png".format(time.strftime("%Y-%m-%d-%H:%M:%S")), "PNG", optimize=True)
+    def save_image(self, img):
+        img.save("output/{}.png".format(time.strftime("%Y-%m-%d-%H:%M:%S")), "PNG", optimize=True)
 
 
 def clamp(x):
@@ -258,7 +266,7 @@ def clamp(x):
 def main():
     master = Tk()
     height = round(master.winfo_screenheight() * 0.6)
-    width = round(master.winfo_screenwidth() * 0.7)
+    width = height
     parser = argparse.ArgumentParser(description='Generate the Mandelbrot set')
     parser.add_argument('-i', '--iterations', type=int, help='The number of iterations done for each pixel.',
                         default=500)
@@ -277,7 +285,7 @@ def main():
                                                                            "computation.")
     args = parser.parse_args()
 
-    get_context().precision =100
+    get_context().precision = 100
 
     t_left = mpc(f"({args.top_left_real} {args.top_left_imag})")
     b_right = mpc(f"({args.bottom_right_real} {args.bottom_right_imag})")

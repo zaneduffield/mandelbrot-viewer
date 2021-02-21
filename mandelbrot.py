@@ -3,12 +3,13 @@ import random
 from typing import List
 
 import numpy as np
-from numba import njit, prange
+from numba import njit, prange, set_num_threads, get_num_threads
+from multiprocessing import cpu_count
 from gmpy2 import mpc, get_context
-# from opencl_test import MandelbrotCL
+from opencl_test import MandelbrotCL
 
 BREAKOUT_R_2 = 20
-from perturbations import mandelbrot_perturbation, get_new_ref
+from perturbations import mandelbrot_perturbation
 
 
 @njit(fastmath=True, parallel=True, nogil=True)
@@ -49,6 +50,7 @@ class Mandelbrot:
         self._set_corners(t_left=t_left, b_right=b_right)
         self.iterations = iterations
         self.multiprocessing = multiprocessing
+        self.set_max_threads()
 
         self.perturbations = perturbations
         self.best_ref = None
@@ -67,8 +69,8 @@ class Mandelbrot:
 
     def set_gpu(self, gpu: bool):
         self.gpu = gpu
-        # if self.gpu and self.cl is None:
-        #     self.cl = MandelbrotCL(self.w, self.h)
+        if self.gpu and self.cl is None:
+            self.cl = MandelbrotCL(self.w, self.h)
 
     def pop_corners(self):
         if not self.corners_stack:
@@ -91,7 +93,7 @@ class Mandelbrot:
     def _set_corners(self, t_left: mpc, b_right: mpc):
         height = t_left.imag - b_right.imag
         width = b_right.real - t_left.real
-        get_context().precision = 100
+        get_context().precision = 120
 
         ratio_target = self.h/self.w
         ratio_curr = height/width
@@ -110,14 +112,17 @@ class Mandelbrot:
     def get_width(self):
         return float(self.b_right.real - self.t_left.real)
 
+    def set_max_threads(self):
+        set_num_threads(cpu_count() - 1 if self.multiprocessing else 1)
+
     def get_pixels(self):
+        self.set_max_threads()
         if self.perturbations:
-            self.pixels = mandelbrot_perturbation(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms)
-            self.pixels = np.array(self.pixels, dtype=np.int32)
-        # elif self.gpu:
-        #     self.pixels = self.cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
+            yield from mandelbrot_perturbation(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms)
+        elif self.gpu:
+            yield self.cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
         else:
-            self.pixels = mandelbrot(complex(self.t_left), complex(self.b_right), self.h, self.w, self.iterations)
+            yield mandelbrot(complex(self.t_left), complex(self.b_right), self.h, self.w, self.iterations)
 
 
 
