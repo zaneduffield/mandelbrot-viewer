@@ -14,30 +14,26 @@ from PIL import Image, ImageTk
 from mandelbrot import Mandelbrot
 from gmpy2 import mpc, get_context
 
-GLITCH_COLOUR = (255, 255, 255)
 BROT_COLOUR = (0, 0, 0)
+GLITCH_COLOUR = BROT_COLOUR
 REF_COLOUR = (255, 0, 0)
 
 
-class Framework(Frame):
+class FractalCanvas(Canvas):
     def __init__(self, parent, height, width, t_left: mpc, b_right: mpc, iterations=None, save=False,
                  use_multiprocessing: bool = True, use_gpu: bool = False, perturbation: bool = False,
-                 palette_length: int = 300,
-                 num_probes: int = 100,
+                 num_probes: int = 25,
                  num_series_terms: int = 7):
-        Frame.__init__(self, parent)
+        Canvas.__init__(self, parent)
+        self.pixels = None
         self.parent = parent
         self.parent.title("Mandelbrot")
 
         self.canvasW, self.canvasH = width, height
-        self.palette_length = palette_length
 
-        self.multiprocessing = BooleanVar()
-        self.multiprocessing.set(use_multiprocessing)
-        self.perturbation = BooleanVar()
-        self.perturbation.set(perturbation)
-        self.gpu = BooleanVar()
-        self.gpu.set(use_gpu)
+        self.multiprocessing = BooleanVar(value=use_multiprocessing)
+        self.perturbation = BooleanVar(value=perturbation)
+        self.gpu = BooleanVar(value=use_gpu)
         self.init_iterations = iterations
 
         self.start_click = None
@@ -85,18 +81,17 @@ class Framework(Frame):
         self.check_gpu.pack(side=RIGHT)
 
         self.pack(fill=BOTH, expand=1)
-        self.canvas = Canvas(self)
 
-        self.canvas.bind("<ButtonPress-1>", self.on_button_press)
-        self.canvas.bind("<B1-Motion>", self.on_move_press)
-        self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
+        self.bind("<ButtonPress-1>", self.on_button_press)
+        self.bind("<B1-Motion>", self.on_move_press)
+        self.bind("<ButtonRelease-1>", self.on_button_release)
 
         self.fractal = Mandelbrot(t_left=t_left, b_right=b_right, iterations=iterations, width=width, height=height,
                                   multiprocessing=self.multiprocessing.get(), gpu=self.gpu.get(), perturbations=perturbation,
                                   num_probes=num_probes, num_series_terms=num_series_terms)
         self.image_stack = []
         self.computed_cur_img = True
-        self.change_palette()
+        self.generate_palette()
         self.pixelColors = []
         self.img = None
         self.save = save
@@ -110,25 +105,27 @@ class Framework(Frame):
                                      f'-bri " {str(self.fractal.b_right.imag)}" '
                                      f'-brr " {str(self.fractal.b_right.real)}" '
                                      f'-i {self.fractal.iterations}')
-        if self.fractal.perturbations:
+        if self.fractal._perturbations:
             self.parent.clipboard_append(" -p")
+
+        if self.fractal._gpu:
+            self.parent.clipboard_append(" -g")
+
         self.parent.update()
 
     def set_pertubations(self):
-        self.fractal.perturbations = self.perturbation.get()
+        self.fractal.set_perturbations(self.perturbation.get())
 
     def set_multiprocessing(self):
         self.fractal.multiprocessing = self.multiprocessing.get()
 
     def set_gpu(self):
         self.fractal.set_gpu(self.gpu.get())
-        self.perturbation.set(False)
-        self.set_pertubations()
 
     def recolour(self):
-        self.change_palette()
+        self.generate_palette()
         if self.computed_cur_img:
-            self.draw()
+            self.draw(self.pixels)
         else:
             self.compute_and_draw()
 
@@ -141,7 +138,7 @@ class Framework(Frame):
         # reset variable
         if self.fractal.iterations != self.init_iterations:
             self.fractal.iterations = self.init_iterations
-            self.set_palette()
+            self.generate_palette()
 
         self.compute_and_draw()
 
@@ -160,11 +157,7 @@ class Framework(Frame):
 
     def on_iter_submit(self, event):
         self.fractal.iterations = int(self.iterations.get())
-        self.set_palette()
-        self.compute_and_draw()
-
-    def on_series_submit(self, event):
-        self.fractal.num_series_terms = int(self.num_terms.get())
+        self.generate_palette()
         self.compute_and_draw()
 
     def on_button_press(self, event):
@@ -173,21 +166,22 @@ class Framework(Frame):
     def on_move_press(self, event):
         # expand rectangle as you drag the mouse
         if self.rect is None:
-            self.rect = self.canvas.create_rectangle(self.start_click[0], self.start_click[1], 1, 1, fill="")
+            self.rect = self.create_rectangle(self.start_click[0], self.start_click[1], 1, 1, fill="")
 
-        self.canvas.coords(self.rect, self.start_click[0], self.start_click[1], event.x, event.y)
+        self.coords(self.rect, self.start_click[0], self.start_click[1], event.x, event.y)
+        self.tag_raise(self.rect)
 
     def on_button_release(self, event):
         if self.rect is None:
             return
 
-        x = self.canvas.coords(self.rect)
+        x = self.coords(self.rect)
         t_left_coords = (min(x[0], x[2]), min(x[1], x[3]))
         b_right_coords = (max(x[0], x[2]), max(x[1], x[3]))
 
         self.fractal.reposition(t_left_coords=t_left_coords, b_right_coords=b_right_coords)
         self.image_stack.append(self.background)
-        self.canvas.delete(self.rect)
+        self.delete(self.rect)
         self.rect = None
         self.compute_and_draw()
 
@@ -198,7 +192,8 @@ class Framework(Frame):
         print('-' * 20)
         start = time.time()
         for pixels in self.fractal.get_pixels():
-            self.draw(pixels)
+            self.pixels = pixels
+            self.draw(self.pixels)
 
         comp_time = time.time()
         print("computation took {} seconds".format(round(comp_time - start, 2)))
@@ -207,60 +202,38 @@ class Framework(Frame):
     def draw(self, pixels):
         self.draw_pixels(pixels)
         self.set_mag()
-        new_image = self.canvas.create_image(0, 0, image=self.background, anchor=NW)
-        if self.canvas_image:
-            self.canvas.delete(self.canvas_image)
+        if self.canvas_image is None:
+            self.canvas_image = self.create_image(0, 0, image=self.background, anchor=NW)
+        else:
+            self.itemconfig(self.canvas_image, image=self.background)
 
-        self.canvas_image = new_image
-        self.canvas.pack(fill=BOTH, expand=1)
-
-    def set_palette(self):
+    def generate_palette(self):
         iterations = self.fractal.iterations
-        self.palette_length = iterations // 2
+        palette_length = iterations // 2
 
-        redb = 2 * math.pi / (self.red_rand_b * (self.palette_length // 2) + self.palette_length // 2)
-        redc = 256 * self.red_rand_c
-        greenb = 2 * math.pi / (self.green_rand_b * (self.palette_length // 2) + self.palette_length // 2)
-        greenc = 256 * self.green_rand_c
-        blueb = 2 * math.pi / (self.blue_rand_b * (self.palette_length // 2) + self.palette_length // 2)
-        bluec = 256 * self.blue_rand_c
+        pairs = [
+            (2 * math.pi / (rand_b * (palette_length // 2) + palette_length // 2), 256 * rand_c)
+            for rand_b, rand_c in np.random.random((3, 2))
+        ]
 
         self.palette = np.empty((iterations + 3, 3), dtype=np.uint8)
         self.palette[0] = BROT_COLOUR
-        for i in range(1, iterations + 1):
-            x = i % self.palette_length
-            r = clamp(int(128 * (math.sin(redb * x + redc) + 1)))
-            g = clamp(int(128 * (math.sin(greenb * x + greenc) + 1)))
-            b = clamp(int(128 * (math.sin(blueb * x + bluec) + 1)))
-            self.palette[i] = [r, g, b]
         self.palette[iterations + 1] = REF_COLOUR
         self.palette[iterations + 2] = GLITCH_COLOUR
 
-    def generate_palette_variables(self):
-        self.red_rand_b = random.random()
-        self.red_rand_c = random.random()
-        self.green_rand_b = random.random()
-        self.green_rand_c = random.random()
-        self.blue_rand_b = random.random()
-        self.blue_rand_c = random.random()
-
-    def change_palette(self):
-        self.generate_palette_variables()
-        self.set_palette()
+        for i, (b, c) in enumerate(pairs):
+            iter_range = np.arange(1, iterations + 1) % palette_length
+            temp = 128 * (np.sin(b * iter_range + c) + 1)
+            self.palette[1:iterations + 1, i] = np.maximum(0, np.minimum(temp.astype(int), 255))
 
     def draw_pixels(self, pixels):
         img = Image.fromarray(self.palette[pixels], "RGB")
         if self.save:
             self.save_image(img)
-        photoimg = ImageTk.PhotoImage(img.resize((self.canvasW, self.canvasH)))
-        self.background = photoimg
+        self.background = ImageTk.PhotoImage(img.resize((self.canvasW, self.canvasH)))
 
     def save_image(self, img):
         img.save("output/{}.png".format(time.strftime("%Y-%m-%d-%H:%M:%S")), "PNG", optimize=True)
-
-
-def clamp(x):
-    return max(0, min(x, 255))
 
 
 def main():
@@ -283,14 +256,15 @@ def main():
     parser.add_argument('-nm', '--no-multiprocessing', action='store_false', help="Don't use multiprocessing.")
     parser.add_argument('-p', '--perturbation', action='store_true', help="Use perturbation theory for high precision "
                                                                            "computation.")
+    parser.add_argument('-g', '--gpu', action='store_true', help="Use GPU via opencl to render")
     args = parser.parse_args()
 
-    get_context().precision = 100
+    get_context().precision = 3000
 
     t_left = mpc(f"({args.top_left_real} {args.top_left_imag})")
     b_right = mpc(f"({args.bottom_right_real} {args.bottom_right_imag})")
-    render = Framework(parent=master, height=height, width=width, use_multiprocessing=args.no_multiprocessing,
-                       t_left=t_left, b_right=b_right, iterations=args.iterations, save=args.save, perturbation=args.perturbation)
+    render = FractalCanvas(parent=master, height=height, width=width, use_multiprocessing=args.no_multiprocessing,
+                           t_left=t_left, b_right=b_right, iterations=args.iterations, save=args.save, perturbation=args.perturbation, use_gpu=args.gpu)
 
     master.geometry("{}x{}".format(render.canvasW, render.canvasH))
     master.mainloop()

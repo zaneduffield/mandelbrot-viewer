@@ -5,7 +5,7 @@ inline bool inRange(double a, double b) {
 }
 
 /* Iterates through the Mandelbrot set at location x,y up to maxTimes */
-__kernel void pixel64(__global ushort* out, const double tl_real, const double tl_imag, const double width_per_pix,
+__kernel void pixel64(__global int* out, const double tl_real, const double tl_imag, const double width_per_pix,
         const int maxTimes, const float s, const float p, const int width) {
     int x = get_global_id(0);
     int y = get_global_id(1);

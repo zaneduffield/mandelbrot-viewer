@@ -1,15 +1,11 @@
-import math
-import random
-from typing import List
-
 import numpy as np
-from numba import njit, prange, set_num_threads, get_num_threads
+from numba import njit, prange, set_num_threads
 from multiprocessing import cpu_count
 from gmpy2 import mpc, get_context
-from opencl_test import MandelbrotCL
 
-BREAKOUT_R_2 = 20
-from perturbations import mandelbrot_perturbation
+from constants import BREAKOUT_R_2
+from opencl_test import MandelbrotCL, ClassicMandelbrotCL
+from perturbations import PerturbationComputer
 
 
 @njit(fastmath=True, parallel=True, nogil=True)
@@ -52,13 +48,13 @@ class Mandelbrot:
         self.multiprocessing = multiprocessing
         self.set_max_threads()
 
-        self.perturbations = perturbations
-        self.best_ref = None
+        self._perturbations = perturbations
+        self._perturbations_computer: PerturbationComputer = None
         self.num_series_terms = num_series_terms
         self.num_probes = num_probes
 
-        self.gpu = gpu
-        self.cl = None
+        self._gpu = gpu
+        self._cl: MandelbrotCL = None
         self.set_gpu(gpu)
 
         self.pixels: np.array = None
@@ -68,9 +64,18 @@ class Mandelbrot:
         self.corners_stack = []
 
     def set_gpu(self, gpu: bool):
-        self.gpu = gpu
-        if self.gpu and self.cl is None:
-            self.cl = MandelbrotCL(self.w, self.h)
+        self._gpu = gpu
+
+    def load_cl(self):
+        if self._cl is None:
+            self._cl = ClassicMandelbrotCL()
+
+    def set_perturbations(self, perturbations: bool):
+        self._perturbations = perturbations
+
+    def load_pert(self):
+        if self._perturbations_computer is None:
+            self._perturbations_computer = PerturbationComputer()
 
     def pop_corners(self):
         if not self.corners_stack:
@@ -93,7 +98,8 @@ class Mandelbrot:
     def _set_corners(self, t_left: mpc, b_right: mpc):
         height = t_left.imag - b_right.imag
         width = b_right.real - t_left.real
-        get_context().precision = 120
+
+        get_context().precision = int(-np.log2(float(width/self.w)))
 
         ratio_target = self.h/self.w
         ratio_curr = height/width
@@ -117,17 +123,11 @@ class Mandelbrot:
 
     def get_pixels(self):
         self.set_max_threads()
-        if self.perturbations:
-            yield from mandelbrot_perturbation(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms)
-        elif self.gpu:
-            yield self.cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
+        if self._perturbations:
+            self.load_pert()
+            yield from self._perturbations_computer.compute(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms, self._gpu)
+        elif self._gpu:
+            self.load_cl()
+            yield self._cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
         else:
             yield mandelbrot(complex(self.t_left), complex(self.b_right), self.h, self.w, self.iterations)
-
-
-
-def translate(value, leftMin, leftMax, rightMin, rightMax):
-    leftSpan = leftMax - leftMin
-    rightSpan = rightMax - rightMin
-    valueScaled = float(value - leftMin) / float(leftSpan)
-    return rightMin + (valueScaled * rightSpan)

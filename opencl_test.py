@@ -6,34 +6,60 @@ import numpy as np
 from gmpy2 import mpc
 
 
-def readProgram(filename, ctx):
-    lines = open(filename, "r").read()
-    prg = cl.Program(ctx, lines).build()
-    return prg
-
-
 class MandelbrotCL:
-    def __init__(self, width, height):
-        self.width, self.height = np.int32(width), np.int32(height)
+    def __init__(self):
         platform = cl.get_platforms()[0]
         print(platform.get_devices())
 
         self.mf = cl.mem_flags
         self.ctx = cl.create_some_context(interactive=False)
-        self.prg = readProgram("mandelbrot.cl", self.ctx)
         self.queue = cl.CommandQueue(self.ctx)
         self.length = 0
+        self.prg = None
+        self.out = None
 
-    def set_arrays(self, length):
-        self.length = length
-        self.a = np.zeros((length, length), dtype=np.uint16, order="C")
-        self.abuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.a.nbytes)
+    def compile(self, program_contents: str):
+        print("compiling...", end='')
+        self.prg = cl.Program(self.ctx, program_contents).build()
+        print("done")
 
-    def get_pixels(self, t_left: mpc, b_right: mpc, height, width, iterations):
+    def set_arrays(self, height, width):
         if self.length != max(height, width):
             self.length = max(height, width)
-            self.set_arrays(self.length)
+            self.a = np.zeros((self.length, self.length), dtype=np.int32, order="C")
+            self.abuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.a.nbytes)
 
+    def manage_buffer(self, height, width):
+        cl_class = self
+
+        class Manager(object):
+            def __enter__(self):
+                cl_class.set_arrays(height, width)
+
+            def __exit__(self, type, value, traceback):
+                cl.enqueue_copy(cl_class.queue, cl_class.a, cl_class.abuf).wait()
+                cl_class.out = cl_class.a[:height, :width]
+
+        return Manager()
+
+    def _compute_pixels(self, *args, **kwargs):
+        raise NotImplemented
+
+    def get_pixels(self, *args, **kwargs):
+        raise NotImplemented
+
+    def __del__(self):
+        if self.abuf is not None:
+            self.abuf.release()
+
+
+class ClassicMandelbrotCL(MandelbrotCL):
+    def __init__(self):
+        super().__init__()
+        with open('mandelbrot.cl') as f:
+            super().compile(f.read())
+
+    def _compute_pixels(self, t_left: mpc, b_right: mpc, width, iterations):
         width_per_pix = float((b_right.real - t_left.real) / width)
         self.prg.pixel64(
             self.queue,
@@ -48,8 +74,8 @@ class MandelbrotCL:
             np.float32(0),
             np.int32(self.length),
         )
-        cl.enqueue_copy(self.queue, self.a, self.abuf).wait()
-        return self.a[:height, :width]
 
-    def __del__(self):
-        self.abuf.release()
+    def get_pixels(self, t_left: mpc, b_right: mpc, height, width, iterations):
+        with self.manage_buffer(height, width):
+            self._compute_pixels(t_left, b_right, width, iterations)
+        return self.out
