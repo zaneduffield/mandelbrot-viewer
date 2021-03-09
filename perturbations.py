@@ -31,16 +31,17 @@ def iterate_ref(ref: mpc, iterations):
 
 
 @njit
-def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int, error_threshold: float):
+def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int, scaling_factor: float):
     probe_deltas_cur = probe_deltas_init.copy()
+    error_threshold = 1/(scaling_factor * 1000)
 
-    terms[0][0] = 1
+    terms[0][0] = 1 / scaling_factor
     for i in range(1, num_terms):
         terms[i][0] = 0
 
     for i in range(ref_escaped_at):
         z_comp = ref_hist[i]
-        terms[0][i + 1] = 2 * z_comp * terms[0][i] + 1
+        terms[0][i + 1] = 2 * z_comp * terms[0][i] + terms[0][0]
         for j in range(1, num_terms):
             s = 0
             for k in range(j):
@@ -54,19 +55,19 @@ def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, t
             probe_deltas_cur[j] = 2 * z_comp * delta + delta * delta + probe_deltas_init[j]
 
             z_del_app = 0
-            delta = probe_deltas_init[j]
+            scaled_delta = probe_deltas_init[j] * scaling_factor
             for k in range(num_terms):
                 term = terms[k][i + 1]
                 if np.isnan(term):
                     break
-                z_del_app += term * delta
-                delta *= probe_deltas_init[j]
+                z_del_app += term * scaled_delta
+                scaled_delta *= probe_deltas_init[j] * scaling_factor
 
             diff = probe_deltas_cur[j] - z_del_app
             if diff.real * diff.real + diff.imag * diff.imag > error_threshold:
-                return i
+                return i, scaling_factor
 
-    return ref_escaped_at
+    return ref_escaped_at, scaling_factor
 
 
 def get_probe_deltas(t_left: mpc, b_right: mpc, ref_init: mpc, num_probes):
@@ -86,9 +87,9 @@ def compute_series_constants(t_left: mpc, b_right: mpc, ref_init: mpc, ref_hist:
     p_deltas_init = get_probe_deltas(t_left, b_right, ref_init, num_probes)
     terms = np.zeros((num_terms, iterations + 1), dtype=np.complex_, order="F")
 
-    error_threshold = float((b_right.real - t_left.real))**2
-    accurate_iters = iterate_series_constants(ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms, error_threshold)
-    return terms, accurate_iters
+    scaling_factor = float(1/(b_right.real - t_left.real))
+    accurate_iters, scaling_factor = iterate_series_constants(ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms, scaling_factor)
+    return terms, accurate_iters, scaling_factor
 
 
 
@@ -113,7 +114,7 @@ class PerturbationComputer:
             print("iterating reference")
             ref_hist, ref_escaped_at = iterate_ref(ref, iterations)
             print("computing series constants...")
-            terms, iter_accurate = compute_series_constants(t_left, b_right, ref, ref_hist, ref_escaped_at, iterations,
+            terms, iter_accurate, scaling_factor = compute_series_constants(t_left, b_right, ref, ref_hist, ref_escaped_at, iterations,
                                                             num_series_terms, num_probes)
 
             print(f"proceeding with {iter_accurate} reference iterations")
@@ -121,7 +122,7 @@ class PerturbationComputer:
 
             pertubation_state = PertubationState(
                 width_per_pixel, width, height, np.array(ref_coords, dtype=np.int32), terms, num_series_terms,
-                ref_escaped_at, ref_hist, iter_accurate, iterations
+                ref_escaped_at, ref_hist, iter_accurate, iterations, scaling_factor
             )
 
             if gpu:
@@ -213,13 +214,14 @@ spec = [
     ('precise_reference', complex128[:]),
     ('iter_accurate', int32),
     ('iterations', int32),
+    ('scaling_factor', float64),
 ]
 
 
 @jitclass(spec)
 class PertubationState:
     def __init__(self, w_per_pix, width, height, ref_coords, terms, num_terms, breakout,
-                 precise_reference, iter_accurate, iterations):
+                 precise_reference, iter_accurate, iterations, scaling_factor):
         self.w_per_pix = w_per_pix
         self.width = width
         self.height = height
@@ -229,6 +231,7 @@ class PertubationState:
         self.precise_reference = precise_reference
         self.iter_accurate = iter_accurate
         self.iterations = iterations
+        self.scaling_factor = scaling_factor
 
 
 class PerturbationCL(MandelbrotCL):
@@ -243,19 +246,20 @@ class PerturbationCL(MandelbrotCL):
         precise_ref_buf = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.precise_reference)
 
         self.prg.approximate_pixels(self.queue, self.a.shape, None, self.abuf,
-                                   np.float64(pert.w_per_pix),
-                                   np.int32(pert.width),
-                                   np.int32(pert.ref_coords[0]),
-                                   np.int32(pert.ref_coords[1]),
-                                   terms_buf,
-                                   np.int32(pert.num_terms),
-                                   np.int32(pert.breakout),
-                                   precise_ref_buf,
-                                   np.int32(pert.iter_accurate),
-                                   np.int32(pert.iterations),
-                                   np.int32(GLITCH_ITER),
-                                   np.int32(fix_glitches),
-                                   )
+                                    np.float64(pert.w_per_pix),
+                                    np.int32(pert.width),
+                                    np.int32(pert.ref_coords[0]),
+                                    np.int32(pert.ref_coords[1]),
+                                    terms_buf,
+                                    np.int32(pert.num_terms),
+                                    np.float64(pert.scaling_factor),
+                                    np.int32(pert.breakout),
+                                    precise_ref_buf,
+                                    np.int32(pert.iter_accurate),
+                                    np.int32(pert.iterations),
+                                    np.int32(GLITCH_ITER),
+                                    np.int32(fix_glitches),
+                                    )
 
     def get_pixels(self, pert, fix_glitches):
         with self.manage_buffer(pert.height, pert.width):
@@ -285,12 +289,12 @@ def get_delta(data, i, j):
 @njit
 def get_estimate(data, i, j, iteration):
     init_delta = get_delta(data, i, j)
-    delta = init_delta
+    scaled_delta = init_delta * data.scaling_factor
     out = 0
     for k in range(data.num_terms):
         term = data.terms[k][iteration]
-        out += term * delta
-        delta *= init_delta
+        out += term * scaled_delta
+        scaled_delta *= init_delta * data.scaling_factor
     return out
 
 

@@ -23,7 +23,7 @@ class FractalCanvas(Canvas):
     def __init__(self, parent, height, width, t_left: mpc, b_right: mpc, iterations=None, save=False,
                  use_multiprocessing: bool = True, use_gpu: bool = False, perturbation: bool = False,
                  num_probes: int = 25,
-                 num_series_terms: int = 7):
+                 num_series_terms: int = 10):
         Canvas.__init__(self, parent)
         self.pixels = None
         self.parent = parent
