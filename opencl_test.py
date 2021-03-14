@@ -5,6 +5,8 @@ import numpy as np
 # os.environ["PYOPENCL_COMPILER_OUTPUT"] = "1"
 from gmpy2 import mpc
 
+from mandelbrot_utils import MandelbrotConfig
+
 
 class MandelbrotCL:
     def __init__(self):
@@ -75,7 +77,7 @@ class ClassicMandelbrotCL(MandelbrotCL):
             np.int32(self.length),
         )
 
-    def get_pixels(self, t_left: mpc, b_right: mpc, height, width, iterations):
-        with self.manage_buffer(height, width):
-            self._compute_pixels(t_left, b_right, width, iterations)
+    def get_pixels(self, config: MandelbrotConfig):
+        with self.manage_buffer(config.height, config.width):
+            self._compute_pixels(config.t_left, config.b_right, config.width, config.iterations)
         return self.out

@@ -1,17 +1,20 @@
 import math
 import random
-import time
 import numpy as np
 import pyopencl as cl
-import pyopencl.tools
 
 from numba import njit, prange, float64, complex128, int32
 from numba.experimental import jitclass
 
-from constants import GLITCH_ITER, MAX_GLITCH_FIX_LOOPS, MAX_OK_GLITCH_COUNT
-from mandelbrot import BREAKOUT_R_2
-from gmpy2 import mpc
+from constants import (
+    GLITCH_ITER,
+    MAX_GLITCH_FIX_LOOPS,
+    MAX_OK_GLITCH_COUNT,
+    BREAKOUT_R_2,
+)
+from gmpy2 import mpc, get_context
 
+from mandelbrot_utils import MandelbrotConfig
 from opencl_test import MandelbrotCL
 
 
@@ -31,7 +34,14 @@ def iterate_ref(ref: mpc, iterations):
 
 
 @njit
-def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, terms, num_terms: int, scaling_factor: float):
+def iterate_series_constants(
+    ref_hist,
+    ref_escaped_at: int,
+    probe_deltas_init,
+    terms,
+    num_terms: int,
+    scaling_factor: float,
+):
     probe_deltas_cur = probe_deltas_init.copy()
     error_threshold = 1/(scaling_factor * 1000)
 
@@ -52,7 +62,9 @@ def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, t
 
         for j in range(len(probe_deltas_init)):
             delta = probe_deltas_cur[j]
-            probe_deltas_cur[j] = 2 * z_comp * delta + delta * delta + probe_deltas_init[j]
+            probe_deltas_cur[j] = (
+                2 * z_comp * delta + delta * delta + probe_deltas_init[j]
+            )
 
             z_del_app = 0
             scaled_delta = probe_deltas_init[j] * scaling_factor
@@ -65,9 +77,9 @@ def iterate_series_constants(ref_hist, ref_escaped_at: int, probe_deltas_init, t
 
             diff = probe_deltas_cur[j] - z_del_app
             if diff.real * diff.real + diff.imag * diff.imag > error_threshold:
-                return i, scaling_factor
+                return i
 
-    return ref_escaped_at, scaling_factor
+    return ref_escaped_at
 
 
 def get_probe_deltas(t_left: mpc, b_right: mpc, ref_init: mpc, num_probes):
@@ -76,77 +88,115 @@ def get_probe_deltas(t_left: mpc, b_right: mpc, ref_init: mpc, num_probes):
     for i in range(square_side_len):
         for j in range(square_side_len):
             x_ratio, y_ratio = i / square_side_len, j / square_side_len
-            probe_del = x_ratio * (b_right.real - t_left.real) - y_ratio * (t_left.imag - b_right.imag) * 1j
+            probe_del = (
+                x_ratio * (b_right.real - t_left.real)
+                - y_ratio * (t_left.imag - b_right.imag) * 1j
+            )
             probes.append(complex(t_left + probe_del - ref_init))
 
     return np.array(probes)
 
 
-def compute_series_constants(t_left: mpc, b_right: mpc, ref_init: mpc, ref_hist: np.ndarray, ref_escaped_at: int,
-                             iterations: int, num_terms, num_probes):
+def compute_series_constants(
+    t_left: mpc,
+    b_right: mpc,
+    ref_init: mpc,
+    ref_hist: np.ndarray,
+    ref_escaped_at: int,
+    iterations: int,
+    num_terms,
+    num_probes,
+):
     p_deltas_init = get_probe_deltas(t_left, b_right, ref_init, num_probes)
     terms = np.zeros((num_terms, iterations + 1), dtype=np.complex_, order="F")
 
-    scaling_factor = float(1/(b_right.real - t_left.real))
-    accurate_iters, scaling_factor = iterate_series_constants(ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms, scaling_factor)
+    scaling_factor = float(1 / (b_right.real - t_left.real))
+    accurate_iters = iterate_series_constants(
+        ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms, scaling_factor
+    )
     return terms, accurate_iters, scaling_factor
-
 
 
 class PerturbationComputer:
     def __init__(self):
         self.cl = None
 
-    def compute(self, t_left: mpc, b_right: mpc, height, width, iterations, num_probes, num_series_terms, gpu: bool):
-        width_per_pixel = float((b_right.real - t_left.real) / width)
-        iterations_grid = np.zeros((height, width), dtype=np.int32)
-        ref_coords = width // 2, height // 2
+    def compute(
+        self,
+        config: MandelbrotConfig,
+        num_probes,
+        num_series_terms,
+    ):
+        width = config.b_right.real - config.t_left.real
+        get_context().precision = int(-np.log2(float(width / config.width))) * 2
+
+        width_per_pixel = float((config.b_right.real - config.t_left.real) / config.width)
+        iterations_grid = np.zeros((config.height, config.width), dtype=np.int32)
+        ref_coords = config.width // 2, config.height // 2
 
         def _ref_from_coords(coords):
-            return t_left + mpc(coords[0] * width_per_pixel - coords[1] * width_per_pixel * 1j)
+            return config.t_left + mpc(
+                coords[0] * width_per_pixel - coords[1] * width_per_pixel * 1j
+            )
 
-        if gpu and self.cl is None:
+        if config.gpu and self.cl is None:
             self.cl = PerturbationCL()
 
         loops = 0
         while loops <= MAX_GLITCH_FIX_LOOPS:
             ref = _ref_from_coords(ref_coords)
             print("iterating reference")
-            ref_hist, ref_escaped_at = iterate_ref(ref, iterations)
+            ref_hist, ref_escaped_at = iterate_ref(ref, config.iterations)
             print("computing series constants...")
-            terms, iter_accurate, scaling_factor = compute_series_constants(t_left, b_right, ref, ref_hist, ref_escaped_at, iterations,
-                                                            num_series_terms, num_probes)
+            terms, iter_accurate, scaling_factor = compute_series_constants(
+                config.t_left,
+                config.b_right,
+                ref,
+                ref_hist,
+                ref_escaped_at,
+                config.iterations,
+                num_series_terms,
+                num_probes,
+            )
 
             print(f"proceeding with {iter_accurate} reference iterations")
             print(f"reference broke out at {ref_escaped_at}")
 
             pertubation_state = PertubationState(
-                width_per_pixel, width, height, np.array(ref_coords, dtype=np.int32), terms, num_series_terms,
-                ref_escaped_at, ref_hist, iter_accurate, iterations, scaling_factor
+                width_per_pixel,
+                config.width,
+                config.height,
+                np.array(ref_coords, dtype=np.int32),
+                terms,
+                num_series_terms,
+                ref_escaped_at,
+                ref_hist,
+                iter_accurate,
+                config.iterations,
+                scaling_factor,
             )
 
-            if gpu:
-                iterations_grid = self.cl.get_pixels(pertubation_state, fix_glitches=loops)
+            if config.gpu:
+                iterations_grid = self.cl.get_pixels(
+                    pertubation_state, fix_glitches=loops
+                )
                 glitched_count = get_glitched_count(pertubation_state, iterations_grid)
             else:
-                glitched_count = approximate_pixels(pertubation_state, iterations_grid, fix_glitches=loops)
+                glitched_count = approximate_pixels(
+                    pertubation_state, iterations_grid, fix_glitches=loops
+                )
 
             yield iterations_grid
             print(f"{glitched_count} glitched pixels remaining")
             if glitched_count <= MAX_OK_GLITCH_COUNT:
+                print(f"min escape iterations: {np.min(np.max(iterations_grid, 0))}")
                 break
 
-            ref_coords = get_new_ref(iterations_grid, width, height, GLITCH_ITER)
+            ref_coords = get_new_ref(iterations_grid, config.width, config.height, GLITCH_ITER)
             if ref_coords is None:
-                ref_coords = random.randint(0, width), random.randint(0, height)
+                ref_coords = random.randint(0, config.width), random.randint(0, config.height)
             print(f"new ref at :{ref_coords}")
             loops += 1
-        #
-        # # # to see the reference pixels in the image
-        # # for x in prev_refs[1:]:
-        # #     iterations_grid[x[1], x[0]] = iterations + 1
-        #
-        #
 
 
 @njit
@@ -204,24 +254,36 @@ def get_new_ref(iterations_grid, width, height, blob_iter):
 
 
 spec = [
-    ('w_per_pix', float64),
-    ('width', int32),
-    ('height', int32),
-    ('ref_coords', int32[:]),
-    ('terms', complex128[:, :]),
-    ('num_terms', int32),
-    ('breakout', int32),
-    ('precise_reference', complex128[:]),
-    ('iter_accurate', int32),
-    ('iterations', int32),
-    ('scaling_factor', float64),
+    ("w_per_pix", float64),
+    ("width", int32),
+    ("height", int32),
+    ("ref_coords", int32[:]),
+    ("terms", complex128[:, :]),
+    ("num_terms", int32),
+    ("breakout", int32),
+    ("precise_reference", complex128[:]),
+    ("iter_accurate", int32),
+    ("iterations", int32),
+    ("scaling_factor", float64),
 ]
 
 
 @jitclass(spec)
 class PertubationState:
-    def __init__(self, w_per_pix, width, height, ref_coords, terms, num_terms, breakout,
-                 precise_reference, iter_accurate, iterations, scaling_factor):
+    def __init__(
+        self,
+        w_per_pix,
+        width,
+        height,
+        ref_coords,
+        terms,
+        num_terms,
+        breakout,
+        precise_reference,
+        iter_accurate,
+        iterations,
+        scaling_factor,
+    ):
         self.w_per_pix = w_per_pix
         self.width = width
         self.height = height
@@ -237,29 +299,39 @@ class PertubationState:
 class PerturbationCL(MandelbrotCL):
     def __init__(self):
         super().__init__()
-        with open('mandelbrot_perturbations.cl') as f:
+        with open("mandelbrot_perturbations.cl") as f:
             super().compile(f.read())
 
     def _compute_pixels(self, pert, fix_glitches):
         print("computing")
-        terms_buf = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.terms)
-        precise_ref_buf = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.precise_reference)
+        terms_buf = cl.Buffer(
+            self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.terms
+        )
+        precise_ref_buf = cl.Buffer(
+            self.ctx,
+            self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
+            hostbuf=pert.precise_reference,
+        )
 
-        self.prg.approximate_pixels(self.queue, self.a.shape, None, self.abuf,
-                                    np.float64(pert.w_per_pix),
-                                    np.int32(pert.width),
-                                    np.int32(pert.ref_coords[0]),
-                                    np.int32(pert.ref_coords[1]),
-                                    terms_buf,
-                                    np.int32(pert.num_terms),
-                                    np.float64(pert.scaling_factor),
-                                    np.int32(pert.breakout),
-                                    precise_ref_buf,
-                                    np.int32(pert.iter_accurate),
-                                    np.int32(pert.iterations),
-                                    np.int32(GLITCH_ITER),
-                                    np.int32(fix_glitches),
-                                    )
+        self.prg.approximate_pixels(
+            self.queue,
+            self.a.shape,
+            None,
+            self.abuf,
+            np.float64(pert.w_per_pix),
+            np.int32(pert.width),
+            np.int32(pert.ref_coords[0]),
+            np.int32(pert.ref_coords[1]),
+            terms_buf,
+            np.int32(pert.num_terms),
+            np.float64(pert.scaling_factor),
+            np.int32(pert.breakout),
+            precise_ref_buf,
+            np.int32(pert.iter_accurate),
+            np.int32(pert.iterations),
+            np.int32(GLITCH_ITER),
+            np.int32(fix_glitches),
+        )
 
     def get_pixels(self, pert, fix_glitches):
         with self.manage_buffer(pert.height, pert.width):
@@ -314,7 +386,11 @@ def approximate_pixel(data, x, y, iterations_grid):
             return -1
 
         if actual_size <= BREAKOUT_R_2:
-            delta_i = 2 * data.precise_reference[i - 1] * delta_i + delta_i * delta_i + delta_0
+            delta_i = (
+                2 * data.precise_reference[i - 1] * delta_i
+                + delta_i * delta_i
+                + delta_0
+            )
         else:
             break
         this_breakout = i + 1

@@ -1,9 +1,12 @@
-import numpy as np
-from numba import njit, prange, set_num_threads
-from multiprocessing import cpu_count
-from gmpy2 import mpc, get_context
+from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import List
 
-from constants import BREAKOUT_R_2
+import numpy as np
+from numba import njit, prange
+
+from constants import BREAKOUT_R_2, NUM_PROBES, NUM_SERIES_TERMS
+from mandelbrot_utils import MandelbrotConfig
 from opencl_test import MandelbrotCL, ClassicMandelbrotCL
 from perturbations import PerturbationComputer
 
@@ -13,8 +16,8 @@ def mandelbrot(t_left, b_right, height, width, iters):
     iterations_grid = np.zeros((height, width), dtype=np.int32)
     t_left_r = t_left.real
     t_left_i = t_left.imag
-    hor_step = (b_right.real - t_left_r)/width
-    ver_step = (t_left.imag - b_right.imag)/height
+    hor_step = (b_right.real - t_left_r) / width
+    ver_step = (t_left.imag - b_right.imag) / height
 
     for y in prange(height):
         c_imag = t_left_i - y * ver_step
@@ -35,99 +38,64 @@ def mandelbrot(t_left, b_right, height, width, iters):
     return iterations_grid
 
 
+@dataclass()
+class Node:
+    config: MandelbrotConfig
+    pixels: np.array
+    parent: 'Node'
+    children: List['Node'] = field(default_factory=list)
+
+
 class Mandelbrot:
-    def __init__(self, width: int, height: int, t_left: mpc, b_right: mpc, iterations: int,
-                 multiprocessing: bool, gpu: bool, perturbations: bool, num_series_terms, num_probes):
-        self.w = width
-        self.h = height
-        self.corners_stack = []
-
-        self.init_corners = (t_left, b_right)
-        self._set_corners(t_left=t_left, b_right=b_right)
-        self.iterations = iterations
-        self.multiprocessing = multiprocessing
-        self.set_max_threads()
-
-        self._perturbations = perturbations
+    def __init__(self):
+        self.history: Node = None
+        self.init_corners = None
         self._perturbations_computer: PerturbationComputer = None
-        self.num_series_terms = num_series_terms
-        self.num_probes = num_probes
-
-        self._gpu = gpu
         self._cl: MandelbrotCL = None
-        self.set_gpu(gpu)
-
         self.pixels: np.array = None
 
-    def reset(self):
-        self._set_corners(*self.init_corners)
-        self.corners_stack = []
-
-    def set_gpu(self, gpu: bool):
-        self._gpu = gpu
-
-    def load_cl(self):
+    def get_cl(self):
         if self._cl is None:
             self._cl = ClassicMandelbrotCL()
+        return self._cl
 
-    def set_perturbations(self, perturbations: bool):
-        self._perturbations = perturbations
-
-    def load_pert(self):
+    def get_pert(self):
         if self._perturbations_computer is None:
             self._perturbations_computer = PerturbationComputer()
+        return self._perturbations_computer
 
-    def pop_corners(self):
-        if not self.corners_stack:
+    def push(self, config: MandelbrotConfig, pixels: np.array):
+        node = Node(deepcopy(config), pixels, self.history)
+        if self.history is not None:
+            self.history.children.append(node)
+        self.history = node
+
+    def back(self):
+        if self.history is None:
             return
-        self._set_corners(*self.corners_stack.pop())
+        out = self.history.parent
+        if out is not None:
+            self.history = out
+            return deepcopy(out.config), out.pixels
 
-    def reposition(self, t_left_coords: tuple, b_right_coords: tuple):
-        b = self.b_right
-        t = self.t_left
+    def next(self):
+        if self.history.children:
+            self.history = self.history.children[-1]
+            return self.history.config, self.history.pixels
 
-        hor_scale = (b.real - t.real)/self.w
-        ver_scale = (t.imag - b.imag)/self.h
-
-        t_left = t + mpc(hor_scale*t_left_coords[0] - ver_scale*t_left_coords[1]*1j)
-        b_right = t + mpc(hor_scale*b_right_coords[0] - ver_scale*b_right_coords[1]*1j)
-
-        self.corners_stack.append((self.t_left, self.b_right))
-        self._set_corners(t_left, b_right)
-
-    def _set_corners(self, t_left: mpc, b_right: mpc):
-        height = t_left.imag - b_right.imag
-        width = b_right.real - t_left.real
-
-        get_context().precision = int(-np.log2(float(width/self.w)))
-
-        ratio_target = self.h/self.w
-        ratio_curr = height/width
-
-        if ratio_target > ratio_curr:
-            diff = (width * ratio_target - height)/2
-            t_left += diff*1j
-            b_right -= diff*1j
+    def get_pixels(self, config: MandelbrotConfig):
+        if config.perturbation:
+            pixels = None
+            for iterative_pixels in self.get_pert().compute(config, NUM_PROBES, NUM_SERIES_TERMS):
+                pixels = iterative_pixels
+                yield pixels
+            self.push(config, pixels)
+        elif config.gpu:
+            pixels = self.get_cl().get_pixels(config)
+            self.push(config, pixels)
+            yield pixels
         else:
-            diff = (height / ratio_target - width) / 2
-            t_left -= diff
-            b_right += diff
-
-        self.t_left, self.b_right = t_left, b_right
-
-    def get_width(self):
-        return float(self.b_right.real - self.t_left.real)
-
-    def set_max_threads(self):
-        set_num_threads(cpu_count() - 1 if self.multiprocessing else 1)
-
-    def get_pixels(self):
-        self.set_max_threads()
-        if self._perturbations:
-            self.load_pert()
-            yield from self._perturbations_computer.compute(self.t_left, self.b_right, self.h, self.w, self.iterations, self.num_probes, self.num_series_terms, self._gpu)
-        elif self._gpu:
-            self.load_cl()
-            yield self._cl.get_pixels(self.t_left, self.b_right, self.h, self.w, self.iterations)
-        else:
-            yield mandelbrot(complex(self.t_left), complex(self.b_right), self.h, self.w, self.iterations)
+            pixels = mandelbrot(complex(config.t_left), complex(config.b_right), config.height, config.width,
+                                config.iterations)
+            self.push(config, pixels)
+            yield pixels
