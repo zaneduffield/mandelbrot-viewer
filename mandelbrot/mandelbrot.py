@@ -5,10 +5,10 @@ from typing import List
 import numpy as np
 from numba import njit, prange
 
-from constants import BREAKOUT_R_2, NUM_PROBES, NUM_SERIES_TERMS
-from mandelbrot_utils import MandelbrotConfig
-from opencl_test import MandelbrotCL, ClassicMandelbrotCL
-from perturbations import PerturbationComputer
+from utils.constants import BREAKOUT_R2, NUM_PROBES, NUM_SERIES_TERMS
+from utils.mandelbrot_utils import MandelbrotConfig
+from opencl.mandelbrot_cl import MandelbrotCL, ClassicMandelbrotCL
+from perturbations.perturbations import PerturbationComputer
 
 
 @njit(fastmath=True, parallel=True, nogil=True)
@@ -24,16 +24,15 @@ def mandelbrot(t_left, b_right, height, width, iters):
         for x in prange(width):
             c_real = t_left_r + x * hor_step
             z_real = z_imag = 0
+            iterations_grid[y, x] = 0
             for i in range(iters):
                 temp = z_real
                 z_real = z_real * z_real - z_imag * z_imag + c_real
                 z_imag = 2 * temp * z_imag + c_imag
 
-                if z_real * z_real + z_imag * z_imag > BREAKOUT_R_2:
+                if z_real * z_real + z_imag * z_imag > BREAKOUT_R2:
                     iterations_grid[y, x] = i + 1
                     break
-            if i == iters - 1:
-                iterations_grid[y, x] = 0
 
     return iterations_grid
 
@@ -49,10 +48,8 @@ class Node:
 class Mandelbrot:
     def __init__(self):
         self.history: Node = None
-        self.init_corners = None
         self._perturbations_computer: PerturbationComputer = None
         self._cl: MandelbrotCL = None
-        self.pixels: np.array = None
 
     def get_cl(self):
         if self._cl is None:
@@ -65,7 +62,7 @@ class Mandelbrot:
         return self._perturbations_computer
 
     def push(self, config: MandelbrotConfig, pixels: np.array):
-        node = Node(deepcopy(config), pixels, self.history)
+        node = Node(deepcopy(config), deepcopy(pixels), self.history)
         if self.history is not None:
             self.history.children.append(node)
         self.history = node
@@ -81,7 +78,7 @@ class Mandelbrot:
     def next(self):
         if self.history.children:
             self.history = self.history.children[-1]
-            return self.history.config, self.history.pixels
+            return deepcopy(self.history.config), self.history.pixels
 
     def get_pixels(self, config: MandelbrotConfig):
         if config.perturbation:

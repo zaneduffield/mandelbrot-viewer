@@ -1,21 +1,21 @@
 import math
 import random
+from pathlib import Path
+
 import numpy as np
 import pyopencl as cl
-
+from gmpy2 import mpc
 from numba import njit, prange, float64, complex128, int32
 from numba.experimental import jitclass
 
-from constants import (
+from utils.constants import (
     GLITCH_ITER,
     MAX_GLITCH_FIX_LOOPS,
     MAX_OK_GLITCH_COUNT,
-    BREAKOUT_R_2,
+    BREAKOUT_R2,
 )
-from gmpy2 import mpc, get_context
-
-from mandelbrot_utils import MandelbrotConfig
-from opencl_test import MandelbrotCL
+from utils.mandelbrot_utils import MandelbrotConfig, set_precision, my_logger
+from opencl.mandelbrot_cl import MandelbrotCL
 
 
 def iterate_ref(ref: mpc, iterations):
@@ -24,7 +24,7 @@ def iterate_ref(ref: mpc, iterations):
     for i in range(iterations):
         temp = complex(ref_curr)
         temp_abs = temp.real * temp.real + temp.imag * temp.imag
-        if temp_abs > BREAKOUT_R_2:
+        if temp_abs > BREAKOUT_R2:
             return ref_hist, i
 
         ref_hist[i] = temp
@@ -128,7 +128,7 @@ class PerturbationComputer:
         num_series_terms,
     ):
         width = config.b_right.real - config.t_left.real
-        get_context().precision = int(-np.log2(float(width / config.width))) * 2
+        set_precision(width / config.width)
 
         width_per_pixel = float((config.b_right.real - config.t_left.real) / config.width)
         iterations_grid = np.zeros((config.height, config.width), dtype=np.int32)
@@ -145,9 +145,9 @@ class PerturbationComputer:
         loops = 0
         while loops <= MAX_GLITCH_FIX_LOOPS:
             ref = _ref_from_coords(ref_coords)
-            print("iterating reference")
+            my_logger.debug("iterating reference")
             ref_hist, ref_escaped_at = iterate_ref(ref, config.iterations)
-            print("computing series constants...")
+            my_logger.debug("computing series constants...")
             terms, iter_accurate, scaling_factor = compute_series_constants(
                 config.t_left,
                 config.b_right,
@@ -159,8 +159,8 @@ class PerturbationComputer:
                 num_probes,
             )
 
-            print(f"proceeding with {iter_accurate} reference iterations")
-            print(f"reference broke out at {ref_escaped_at}")
+            my_logger.debug(f"proceeding with {iter_accurate} reference iterations")
+            my_logger.debug(f"reference broke out at {ref_escaped_at}")
 
             pertubation_state = PertubationState(
                 width_per_pixel,
@@ -187,15 +187,15 @@ class PerturbationComputer:
                 )
 
             yield iterations_grid
-            print(f"{glitched_count} glitched pixels remaining")
+            my_logger.debug(f"{glitched_count} pixels remaining")
             if glitched_count <= MAX_OK_GLITCH_COUNT:
-                print(f"min escape iterations: {np.min(np.max(iterations_grid, 0))}")
+                my_logger.debug(f"min escape iterations: {np.min(np.max(iterations_grid, 0))}")
                 break
 
             ref_coords = get_new_ref(iterations_grid, config.width, config.height, GLITCH_ITER)
             if ref_coords is None:
                 ref_coords = random.randint(0, config.width), random.randint(0, config.height)
-            print(f"new ref at :{ref_coords}")
+            my_logger.debug(f"new ref at :{ref_coords}")
             loops += 1
 
 
@@ -299,11 +299,11 @@ class PertubationState:
 class PerturbationCL(MandelbrotCL):
     def __init__(self):
         super().__init__()
-        with open("mandelbrot_perturbations.cl") as f:
+        with open(Path(__file__).parent / "mandelbrot_perturbations.cl") as f:
             super().compile(f.read())
 
     def _compute_pixels(self, pert, fix_glitches):
-        print("computing")
+        my_logger.debug("computing")
         terms_buf = cl.Buffer(
             self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.terms
         )
@@ -331,6 +331,7 @@ class PerturbationCL(MandelbrotCL):
             np.int32(pert.iterations),
             np.int32(GLITCH_ITER),
             np.int32(fix_glitches),
+            np.int32(BREAKOUT_R2)
         )
 
     def get_pixels(self, pert, fix_glitches):
@@ -344,7 +345,7 @@ def search_for_escape(data, lo, hi, x, y):
     while hi != lo:
         mid = (lo + hi) // 2
         point = data.precise_reference[mid] + get_estimate(data, x, y, mid)
-        if point.real * point.real + point.imag * point.imag <= BREAKOUT_R_2:
+        if point.real * point.real + point.imag * point.imag <= BREAKOUT_R2:
             lo = mid + 1
         else:
             hi = mid
@@ -372,7 +373,6 @@ def get_estimate(data, i, j, iteration):
 
 @njit
 def approximate_pixel(data, x, y, iterations_grid):
-    # TODO: why does using iter_accurate without -1 cause issues???
     delta_i = get_estimate(data, x, y, data.iter_accurate - 1)
     delta_0 = get_delta(data, x, y)
     this_breakout = 0
@@ -385,7 +385,7 @@ def approximate_pixel(data, x, y, iterations_grid):
             iterations_grid[y, x] = GLITCH_ITER
             return -1
 
-        if actual_size <= BREAKOUT_R_2:
+        if actual_size <= BREAKOUT_R2:
             delta_i = (
                 2 * data.precise_reference[i - 1] * delta_i
                 + delta_i * delta_i
@@ -412,20 +412,18 @@ def approximate_pixel(data, x, y, iterations_grid):
 
 @njit(parallel=True)
 def approximate_pixels(precision: PertubationState, iterations_grid, fix_glitches):
+    incomplete_count = 0
     glitched_count = 0
-    legit_glitched_count = 0
 
     for y in prange(precision.height):
         for x in range(precision.width):
             if fix_glitches and iterations_grid[y, x] != GLITCH_ITER:
                 continue
             result = approximate_pixel(precision, x, y, iterations_grid)
-            if result:
-                glitched_count += 1
-                if result < 0:
-                    legit_glitched_count += 1
-    print("legit glitched", legit_glitched_count)
-    return glitched_count
+            incomplete_count += int(result != 0)
+            glitched_count += int(result < 0)
+
+    return incomplete_count
 
 
 @njit

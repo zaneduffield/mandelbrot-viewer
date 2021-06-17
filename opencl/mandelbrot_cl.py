@@ -1,17 +1,19 @@
-import pyopencl as cl
-import numpy as np
+from pathlib import Path
 
+import numpy as np
+import pyopencl as cl
 # import os
 # os.environ["PYOPENCL_COMPILER_OUTPUT"] = "1"
 from gmpy2 import mpc
 
-from mandelbrot_utils import MandelbrotConfig
+from utils.constants import BREAKOUT_R2
+from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 
 class MandelbrotCL:
     def __init__(self):
         platform = cl.get_platforms()[0]
-        print(platform.get_devices())
+        my_logger.debug(platform.get_devices())
 
         self.mf = cl.mem_flags
         self.ctx = cl.create_some_context(interactive=False)
@@ -21,9 +23,9 @@ class MandelbrotCL:
         self.out = None
 
     def compile(self, program_contents: str):
-        print("compiling...", end='')
+        my_logger.debug("compiling...")
         self.prg = cl.Program(self.ctx, program_contents).build()
-        print("done")
+        my_logger.debug("done")
 
     def set_arrays(self, height, width):
         if self.length != max(height, width):
@@ -38,7 +40,7 @@ class MandelbrotCL:
             def __enter__(self):
                 cl_class.set_arrays(height, width)
 
-            def __exit__(self, type, value, traceback):
+            def __exit__(self, *args):
                 cl.enqueue_copy(cl_class.queue, cl_class.a, cl_class.abuf).wait()
                 cl_class.out = cl_class.a[:height, :width]
 
@@ -58,7 +60,7 @@ class MandelbrotCL:
 class ClassicMandelbrotCL(MandelbrotCL):
     def __init__(self):
         super().__init__()
-        with open('mandelbrot.cl') as f:
+        with open(Path(__file__).parent / 'mandelbrot.cl') as f:
             super().compile(f.read())
 
     def _compute_pixels(self, t_left: mpc, b_right: mpc, width, iterations):
@@ -75,6 +77,7 @@ class ClassicMandelbrotCL(MandelbrotCL):
             np.float32(0),
             np.float32(0),
             np.int32(self.length),
+            np.int32(BREAKOUT_R2)
         )
 
     def get_pixels(self, config: MandelbrotConfig):

@@ -1,12 +1,3 @@
-#ifdef cl_khr_fp64
-    #pragma OPENCL EXTENSION cl_khr_fp64 : enable
-#elif defined(cl_amd_fp64)
-    #pragma OPENCL EXTENSION cl_amd_fp64 : enable
-#else
-    #error "Double precision floating point not supported by OpenCL implementation."
-#endif
-
-#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 #define PYOPENCL_DEFINE_CDOUBLE
 #include <pyopencl-complex.h>
 
@@ -53,7 +44,8 @@ inline int search_for_escape(
     int lo,
     int hi,
     const int x,
-    const int y
+    const int y,
+    const int BREAKOUT_R2
 ){
     int mid;
     cdouble_t delta, point;
@@ -61,7 +53,7 @@ inline int search_for_escape(
         mid = (lo + hi)/2;
         delta = get_delta(ref_x, ref_y, w_per_pix, x, y);
         point = cdouble_add(precise_reference[mid], get_estimate(num_terms, terms, term_scaling_factor, delta, mid));
-        if (sq_mod(point) <= 10){
+        if (sq_mod(point) <= BREAKOUT_R2){
             lo = mid + 1;
         } else {
             hi = mid;
@@ -83,7 +75,8 @@ void approximate_pixel(
     __constant cdouble_t* precise_reference,
     const int iter_accurate,
     const int iterations,
-    const int glitch_iter
+    const int glitch_iter,
+    const int BREAKOUT_R2
 ){
     int x = get_global_id(0);
     int y = get_global_id(1);
@@ -102,7 +95,7 @@ void approximate_pixel(
             return;
         }
 
-        if (actual_size <= 10){
+        if (actual_size <= BREAKOUT_R2){
             delta_i = cdouble_add(
                 cdouble_mulr(cdouble_mul(precise_reference[i-1], delta_i), 2),
                 cdouble_add(cdouble_mul(delta_i, delta_i), delta_0)
@@ -115,7 +108,7 @@ void approximate_pixel(
 
     if (this_breakout == 0){
         // broke out before iterating, find true breakout value using binary search on accurate estimations
-        out[y * width + x] = search_for_escape(precise_reference, num_terms, terms, term_scaling_factor, ref_x, ref_y, w_per_pix, 0, iter_accurate, x, y) + 1;
+        out[y * width + x] = search_for_escape(precise_reference, num_terms, terms, term_scaling_factor, ref_x, ref_y, w_per_pix, 0, iter_accurate, x, y, BREAKOUT_R2) + 1;
     } else if (this_breakout == breakout){
         if (breakout < iterations){
             out[y * width + x] = glitch_iter;
@@ -141,11 +134,12 @@ __kernel void approximate_pixels(
     const int iter_accurate,
     const int iterations,
     const int glitch_iter,
-    const int fix_glitches
+    const int fix_glitches,
+    const int BREAKOUT_R2
 ){
     int x = get_global_id(0);
     int y = get_global_id(1);
     if (fix_glitches == 0 || out[y * width + x] == glitch_iter) {
-        approximate_pixel(out, w_per_pix, width, ref_x, ref_y, terms, num_terms, term_scaling_factor, breakout, precise_reference, iter_accurate, iterations, glitch_iter);
+        approximate_pixel(out, w_per_pix, width, ref_x, ref_y, terms, num_terms, term_scaling_factor, breakout, precise_reference, iter_accurate, iterations, glitch_iter, BREAKOUT_R2);
     }
 }

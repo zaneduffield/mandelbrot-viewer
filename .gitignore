@@ -1,6 +1,8 @@
 venv
 build
+.vscode
 *.pyd
 .idea
 __pycache__
 pert_struct.h
+*.whl

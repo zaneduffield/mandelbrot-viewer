@@ -1,12 +1,12 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 
-inline bool inRange(double a, double b) {
-    return a * a + b * b < 4.0;
+inline bool inRange(double a, double b, int BREAKOUT_R2) {
+    return a * a + b * b < BREAKOUT_R2;
 }
 
 /* Iterates through the Mandelbrot set at location x,y up to maxTimes */
 __kernel void pixel64(__global int* out, const double tl_real, const double tl_imag, const double width_per_pix,
-        const int maxTimes, const float s, const float p, const int width) {
+        const int maxTimes, const float s, const float p, const int width, const int BREAKOUT_R2) {
     int x = get_global_id(0);
     int y = get_global_id(1);
 
@@ -17,7 +17,7 @@ __kernel void pixel64(__global int* out, const double tl_real, const double tl_i
     double c_imag = tl_imag - y*width_per_pix;
     double temp;
 
-    while (times < maxTimes && inRange(z_real, z_imag)) {
+    while (times < maxTimes && inRange(z_real, z_imag, BREAKOUT_R2)) {
         temp = z_real;
         z_real = z_real * z_real - z_imag * z_imag + c_real;
         z_imag = 2 * temp * z_imag + c_imag;
