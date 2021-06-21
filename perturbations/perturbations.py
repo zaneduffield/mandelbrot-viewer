@@ -3,32 +3,31 @@ import random
 from pathlib import Path
 
 import numpy as np
-import pyopencl as cl
 from gmpy2 import mpc
 from numba import njit, prange, float64, complex128, int32
 from numba.experimental import jitclass
 
+from opencl.mandelbrot_cl import MandelbrotCL, cl
 from utils.constants import (
     GLITCH_ITER,
     MAX_GLITCH_FIX_LOOPS,
     MAX_OK_GLITCH_COUNT,
     BREAKOUT_R2,
 )
-from utils.mandelbrot_utils import MandelbrotConfig, set_precision, my_logger
-from opencl.mandelbrot_cl import MandelbrotCL
+from utils.mandelbrot_utils import MandelbrotConfig, my_logger, set_precision_from_config
 
 
-def iterate_ref(ref: mpc, iterations):
+def iterate_ref(init_ref: mpc, iterations):
     ref_hist = np.empty(iterations, dtype=np.complex_)
-    ref_curr = ref
+    ref = init_ref
     for i in range(iterations):
-        temp = complex(ref_curr)
+        temp = complex(ref)
         temp_abs = temp.real * temp.real + temp.imag * temp.imag
         if temp_abs > BREAKOUT_R2:
             return ref_hist, i
 
         ref_hist[i] = temp
-        ref_curr = ref_curr * ref_curr + ref
+        ref = ref * ref + init_ref
 
     return ref_hist, iterations
 
@@ -42,9 +41,15 @@ def iterate_series_constants(
     num_terms: int,
     scaling_factor: float,
 ):
-    probe_deltas_cur = probe_deltas_init.copy()
-    error_threshold = 1/(scaling_factor * 1000)
+    """
+    The error threshold has a huge impact on the correctness of the series approximation, and it needs to decrease
+    as we zoom in further. Scaling the error threshold with the 2nd power of the inverse of the scaling factor isn't
+    enough to prevent glitches on the negative real axis at even shallow zoom depths. Scaling with the 3rd power seems
+    to be a decent trade-off but does sacrifice a lot the benefits of series approximation in most cases.
+    """
+    error_threshold = 1 / scaling_factor**2
 
+    probe_deltas_cur = probe_deltas_init.copy()
     terms[0][0] = 1 / scaling_factor
     for i in range(1, num_terms):
         terms[i][0] = 0
@@ -127,17 +132,15 @@ class PerturbationComputer:
         num_probes,
         num_series_terms,
     ):
-        width = config.b_right.real - config.t_left.real
-        set_precision(width / config.width)
+        set_precision_from_config(config)
 
         width_per_pixel = float((config.b_right.real - config.t_left.real) / config.width)
+        height_per_pixel = float((-config.b_right.imag + config.t_left.imag) / config.height)
         iterations_grid = np.zeros((config.height, config.width), dtype=np.int32)
         ref_coords = config.width // 2, config.height // 2
 
-        def _ref_from_coords(coords):
-            return config.t_left + mpc(
-                coords[0] * width_per_pixel - coords[1] * width_per_pixel * 1j
-            )
+        def _ref_from_coords(coords: tuple):
+            return config.t_left + coords[0] * width_per_pixel - coords[1] * width_per_pixel * 1j
 
         if config.gpu and self.cl is None:
             self.cl = PerturbationCL()
@@ -199,58 +202,28 @@ class PerturbationComputer:
             loops += 1
 
 
-@njit
-def get_random_new_ref(iterations_grid, width, height, glitched_count):
-    x = random.randint(0, glitched_count - 1)
-    for j in range(height):
-        for i in range(width):
-            if iterations_grid[j, i] == GLITCH_ITER:
-                if x == 0:
-                    return i, j
-                x -= 1
-
-
 @njit(parallel=True)
 def get_new_ref(iterations_grid, width, height, blob_iter):
-    lo_x, hi_x = 0, width
-    lo_y, hi_y = 0, height
+    lo = [0, 0]
+    hi = [width, height]
 
     blob_counts = [0, 0]
-    while max(blob_counts) / ((hi_x - lo_x) * (hi_y - lo_y)) < 0.499:
+    while max(blob_counts) / ((hi[0] - lo[0]) * (hi[1] - lo[1])) < 0.499:
         blob_counts = [0, 0]
 
-        if hi_x - lo_x > hi_y - lo_y:
-            mid = (hi_x + lo_x) // 2
-            for y in prange(lo_y, hi_y):
-                for x in range(lo_x, mid):
-                    if iterations_grid[y, x] == blob_iter:
-                        blob_counts[0] += 1
+        dim = int(hi[0] - lo[0] < hi[1] - lo[1])
+        mid = (hi[dim] + lo[dim]) // 2
+        for y in prange(lo[1], hi[1]):
+            for x in prange(lo[0], hi[0]):
+                sector = int((x, y)[dim] > mid)
+                blob_counts[sector] += int(iterations_grid[y, x] == blob_iter)
 
-                for x in range(mid, hi_x):
-                    if iterations_grid[y, x] == blob_iter:
-                        blob_counts[1] += 1
-
-            if blob_counts[0] > blob_counts[1]:
-                hi_x = mid
-            else:
-                lo_x = mid
+        if blob_counts[0] > blob_counts[1]:
+            hi[dim] = mid
         else:
-            mid = (hi_y + lo_y) // 2
-            for x in prange(lo_x, hi_x):
-                for y in range(lo_y, mid):
-                    if iterations_grid[y, x] == blob_iter:
-                        blob_counts[0] += 1
+            lo[dim] = mid
 
-                for y in range(mid, hi_y):
-                    if iterations_grid[y, x] == blob_iter:
-                        blob_counts[1] += 1
-
-            if blob_counts[0] > blob_counts[1]:
-                hi_y = mid
-            else:
-                lo_y = mid
-
-    return (hi_x + lo_x) // 2, (hi_y + lo_y) // 2
+    return (hi[0] + lo[0]) // 2, (hi[1] + lo[1]) // 2
 
 
 spec = [
@@ -381,7 +354,7 @@ def approximate_pixel(data, x, y, iterations_grid):
         point = delta_i + x_i
         actual_size = point.real * point.real + point.imag * point.imag
 
-        if actual_size < 0.000001 * (x_i.real * x_i.real + x_i.imag * x_i.imag):
+        if actual_size < 0.0000001 * (x_i.real * x_i.real + x_i.imag * x_i.imag):
             iterations_grid[y, x] = GLITCH_ITER
             return -1
 

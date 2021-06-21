@@ -1,7 +1,6 @@
 #define PYOPENCL_DEFINE_CDOUBLE
 #include <pyopencl-complex.h>
 
-
 inline float sq_mod(cdouble_t c){
     return c.real*c.real + c.imag*c.imag;
 }
@@ -87,10 +86,9 @@ void approximate_pixel(
     for (int i=iter_accurate; i<breakout; i++) {
         cdouble_t x_i = precise_reference[i-1];
         cdouble_t point = cdouble_add(delta_i, x_i);
-        // float actual_size = point.real * point.real + point.imag * point.imag;
         float actual_size = sq_mod(point);
 
-        if (actual_size < 0.000001 * sq_mod(x_i)) {
+        if (actual_size < 0.00000001 * sq_mod(x_i)) {
             out[y * width + x] = glitch_iter;
             return;
         }

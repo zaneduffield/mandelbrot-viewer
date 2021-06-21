@@ -5,10 +5,10 @@ from typing import List
 import numpy as np
 from numba import njit, prange
 
-from utils.constants import BREAKOUT_R2, NUM_PROBES, NUM_SERIES_TERMS
-from utils.mandelbrot_utils import MandelbrotConfig
 from opencl.mandelbrot_cl import MandelbrotCL, ClassicMandelbrotCL
 from perturbations.perturbations import PerturbationComputer
+from utils.constants import BREAKOUT_R2, NUM_PROBES, NUM_SERIES_TERMS
+from utils.mandelbrot_utils import MandelbrotConfig
 
 
 @njit(fastmath=True, parallel=True, nogil=True)

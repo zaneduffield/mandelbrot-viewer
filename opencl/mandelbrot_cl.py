@@ -1,13 +1,20 @@
 from pathlib import Path
 
 import numpy as np
-import pyopencl as cl
 # import os
 # os.environ["PYOPENCL_COMPILER_OUTPUT"] = "1"
 from gmpy2 import mpc
 
 from utils.constants import BREAKOUT_R2
 from utils.mandelbrot_utils import MandelbrotConfig, my_logger
+
+PY_OPEN_CL_INSTALLED = False
+cl = None
+try:
+    import pyopencl as cl
+    PY_OPEN_CL_INSTALLED = True
+except ModuleNotFoundError:
+    my_logger.warn("No PyOpenCL installation found.")
 
 
 class MandelbrotCL:
@@ -70,12 +77,10 @@ class ClassicMandelbrotCL(MandelbrotCL):
             self.a.shape,
             None,
             self.abuf,
-            np.float64(t_left.real),
-            np.float64(t_left.imag),
+            np.complex128(t_left),
             np.float64(width_per_pix),
             np.int32(iterations),
-            np.float32(0),
-            np.float32(0),
+            np.complex128(0),
             np.int32(self.length),
             np.int32(BREAKOUT_R2)
         )

@@ -1,5 +1,4 @@
 import argparse
-import logging
 
 from gmpy2 import mpfr, mpc, get_context
 
@@ -74,7 +73,7 @@ def main():
     width = 2 / mpfr(args.zoom)
     center = mpc(args.center)
 
-    half_diag = width / 2 * (-1 + 1j)
+    half_diag = (width / 2) * (-1 + 1j)
     t_left = center + half_diag
     b_right = center - half_diag
 
