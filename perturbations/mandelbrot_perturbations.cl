@@ -46,23 +46,11 @@ inline int search_for_escape(
     const int y,
     const int BREAKOUT_R2
 ){
-    int mid;
-    cdouble_t delta, point;
-    while (hi != lo) {
-        mid = (lo + hi)/2;
-        delta = get_delta(ref_x, ref_y, w_per_pix, x, y);
-        point = cdouble_add(precise_reference[mid], get_estimate(num_terms, terms, term_scaling_factor, delta, mid));
-        if (sq_mod(point) <= BREAKOUT_R2){
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    return hi;
 }
 
-void approximate_pixel(
-    __global int* out,
+__kernel void approximate_pixels(
+    __global int* iterations,
+    __global cdouble_t* points,
     const double w_per_pix,
     const int width,
     const int ref_x,
@@ -73,30 +61,35 @@ void approximate_pixel(
     const int breakout,
     __constant cdouble_t* precise_reference,
     const int iter_accurate,
-    const int iterations,
+    const int max_iterations,
     const int glitch_iter,
+    const int fix_glitches,
     const int BREAKOUT_R2
 ){
     int x = get_global_id(0);
     int y = get_global_id(1);
-
+    if (fix_glitches != 0 && iterations[y * width + x] != glitch_iter) {
+        return;
+    }
     cdouble_t delta_0 = get_delta(ref_x, ref_y, w_per_pix, x, y);
     cdouble_t delta_i = get_estimate(num_terms, terms, term_scaling_factor, delta_0, iter_accurate-1);
+    cdouble_t point;
     int this_breakout = 0;
     for (int i=iter_accurate; i<breakout; i++) {
         cdouble_t x_i = precise_reference[i-1];
-        cdouble_t point = cdouble_add(delta_i, x_i);
-        float actual_size = sq_mod(point);
+        point = cdouble_add(delta_i, x_i);
+        float point_sq_mod = sq_mod(point);
 
-        if (actual_size < 0.00000001 * sq_mod(x_i)) {
-            out[y * width + x] = glitch_iter;
+        if (point_sq_mod < 0.00000001 * sq_mod(x_i)) {
+            iterations[y * width + x] = glitch_iter;
             return;
-        }
-
-        if (actual_size <= BREAKOUT_R2){
+        } else if (point_sq_mod <= BREAKOUT_R2){
             delta_i = cdouble_add(
-                cdouble_mulr(cdouble_mul(precise_reference[i-1], delta_i), 2),
-                cdouble_add(cdouble_mul(delta_i, delta_i), delta_0)
+                cdouble_rmul(2, cdouble_mul(precise_reference[i-1], delta_i)),
+                cdouble_add(
+                    cdouble_mul(delta_i, delta_i),
+                    delta_0
+                )
             );
         } else {
             break;
@@ -106,38 +99,23 @@ void approximate_pixel(
 
     if (this_breakout == 0){
         // broke out before iterating, find true breakout value using binary search on accurate estimations
-        out[y * width + x] = search_for_escape(precise_reference, num_terms, terms, term_scaling_factor, ref_x, ref_y, w_per_pix, 0, iter_accurate, x, y, BREAKOUT_R2) + 1;
-    } else if (this_breakout == breakout){
-        if (breakout < iterations){
-            out[y * width + x] = glitch_iter;
-        } else {
-            out[y * width + x] = 0;
+        int mid, lo = 1, hi = iter_accurate - 1;
+        cdouble_t delta;
+        while (hi != lo) {
+            mid = (lo + hi)/2;
+            point = cdouble_add(precise_reference[mid], get_estimate(num_terms, terms, term_scaling_factor, delta_0, mid));
+            if (sq_mod(point) <= BREAKOUT_R2){
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
         }
+        iterations[y * width + x] = hi + 1;
+    } else if (this_breakout == breakout && breakout < max_iterations){
+        // fake 'glitch' because this point didn't break out before the reference
+        iterations[y * width + x] = glitch_iter;
     } else {
-        out[y * width + x] = this_breakout;
+        iterations[y * width + x] = this_breakout;
     }
-}
-
-__kernel void approximate_pixels(
-    __global int* out,
-    const double w_per_pix,
-    const int width,
-    const int ref_x,
-    const int ref_y,
-    __constant cdouble_t* terms,
-    const int num_terms,
-    const double term_scaling_factor,
-    const int breakout,
-    __constant cdouble_t* precise_reference,
-    const int iter_accurate,
-    const int iterations,
-    const int glitch_iter,
-    const int fix_glitches,
-    const int BREAKOUT_R2
-){
-    int x = get_global_id(0);
-    int y = get_global_id(1);
-    if (fix_glitches == 0 || out[y * width + x] == glitch_iter) {
-        approximate_pixel(out, w_per_pix, width, ref_x, ref_y, terms, num_terms, term_scaling_factor, breakout, precise_reference, iter_accurate, iterations, glitch_iter, BREAKOUT_R2);
-    }
+    points[y * width + x] = point;
 }

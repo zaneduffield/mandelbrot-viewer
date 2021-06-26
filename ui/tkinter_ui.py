@@ -11,6 +11,7 @@ from gmpy2 import mpc
 from mandelbrot.mandelbrot import Mandelbrot
 from mandelbrot_viewer import make_cli_args
 from opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
+from utils.constants import BREAKOUT_R2, GLITCH_ITER
 from utils.mandelbrot_utils import MandelbrotConfig, set_precision_from_config, my_logger
 
 BROT_COLOUR = (0, 0, 0)
@@ -28,7 +29,7 @@ class FractalUI(tk.Frame):
             save: bool
     ):
         tk.Frame.__init__(self, parent)
-        self.pixels = None
+        self.compute_result = None
         self.parent = parent
         self.parent.title("Mandelbrot")
 
@@ -57,7 +58,7 @@ class FractalUI(tk.Frame):
         tk.Label(l_controls, text="Max iterations", height=1).pack(side=tk.LEFT)
         self.iterations = tk.StringVar(value=config.iterations)
         iter_entry = tk.Entry(l_controls, textvariable=self.iterations, width=10)
-        iter_entry.bind("<Return>", self.on_iter_submit)
+        iter_entry.bind("<Return>", lambda _: self.compute_and_draw())
         iter_entry.pack(side=tk.LEFT)
 
         tk.Button(r_controls, command=self.copy_cli, text="copy CLI").pack(side=tk.RIGHT)
@@ -93,7 +94,7 @@ class FractalUI(tk.Frame):
 
     def recolour(self):
         self.palette = generate_palette()
-        self.draw_pixels(self.pixels)
+        self.draw(self.compute_result)
 
     def read_config(self):
         self.iterations.set(self.compute_config.iterations)
@@ -120,12 +121,12 @@ class FractalUI(tk.Frame):
 
         self.load(pop)
 
-    def load(self, pop: Tuple[MandelbrotConfig, np.array]):
+    def load(self, pop: Tuple[MandelbrotConfig, np.array, np.array]):
         if pop is None:
             return
-        self.compute_config, self.pixels = pop
+        self.compute_config, *self.compute_result = pop
         self.read_config()
-        self.draw_pixels(self.pixels)
+        self.draw(self.compute_result)
 
     def back(self):
         self.load(self.fractal.back())
@@ -138,10 +139,6 @@ class FractalUI(tk.Frame):
         width = self.compute_config.b_right.real - self.compute_config.t_left.real
         self.mag.replace("1.0", "1.end", f"width: {width:.2e}")
         self.mag.config(state=tk.DISABLED)
-
-    def on_iter_submit(self, event):
-        self.palette = generate_palette()
-        self.compute_and_draw()
 
     def on_button_press(self, event):
         self.start_click = (event.x, event.y)
@@ -220,9 +217,9 @@ class FractalUI(tk.Frame):
         my_logger.info("-" * 80)
         start = time.time()
         self.write_config()
-        for pixels in self.fractal.get_pixels(self.compute_config):
-            self.pixels = pixels
-            self.draw_pixels(self.pixels)
+        for result in self.fractal.compute(self.compute_config):
+            self.compute_result = result
+            self.draw(self.compute_result)
 
         duration = time.time() - start
         my_logger.info("computation took {} seconds".format(round(duration, 2)))
@@ -250,12 +247,32 @@ class FractalUI(tk.Frame):
             self.image_canvas.itemconfig(self.canvas_image, image=tk_image)
         self.image_canvas.image = tk_image
 
-    def draw_pixels(self, iterations, ncycles=30):
-        MAX_VAL = 255
-        scaled_iterations = np.sqrt(np.abs(iterations)) % ncycles / ncycles
+    def draw(self, result):
+        iterations, points = result
+        # iterations = iterations[:]  # to prevent mutation
+
+        # make perturbation glitches appear like brot points
+        iterations = iterations + (iterations == GLITCH_ITER).astype(np.int32) * self.compute_config.iterations
+        brot_pixels = iterations == self.compute_config.iterations
+
+        iterations = convert_to_fractional_counts(iterations, points).astype(np.int64)
+        # rescale to 0 so we can use the values as indices to the cumulative counts
+        iterations -= np.min(iterations)
+
+        histogram = np.histogram(iterations, np.max(iterations) + 1)[0]
+        # don't let brot pixels affect colour scaling
+        histogram[-1] -= np.sum(brot_pixels)
+        cumulative_counts = np.cumsum(histogram)
+        # rescale so the entire colour range is used (otherwise the first colour used would be offset)
+        cumulative_counts = cumulative_counts - cumulative_counts[0]
+        relative_cumulative_counts = cumulative_counts[iterations] / cumulative_counts[-1]
+
         num_colours = self.palette.shape[0] - 1
-        indexes = np.round(scaled_iterations * num_colours).astype(np.int32)
-        colours = (MAX_VAL * self.palette[indexes]).astype(np.uint8)
+        indices = np.minimum(num_colours, (num_colours * relative_cumulative_counts).astype(np.int32))
+
+        colours = (255 * self.palette[indices]).astype(np.uint8)
+        colours[brot_pixels] = BROT_COLOUR
+
         self.set_image(Image.fromarray(colours, "RGB"))
 
     def save_image(self, image):
@@ -266,16 +283,23 @@ class FractalUI(tk.Frame):
         )
 
 
-def generate_palette(rgb_offsets=(0.1, -0.2, 0.5)):
+def convert_to_fractional_counts(iterations, points, scale=100):
+    abs_points = np.maximum(2, np.abs(points))
+    return scale * (iterations + np.log2(0.5*np.log2(BREAKOUT_R2)) - np.log2(np.log2(abs_points)))
+
+
+def generate_palette(rgb_offsets=None):
+    if rgb_offsets is None:
+        rgb_offsets = np.random.random(size=3)
     cols = np.linspace(0, 1, 2**11)
-    a = np.column_stack((cols + offset) * 2 * np.pi for offset in rgb_offsets)
+    a = np.column_stack([(cols + offset) * 1.5 * np.pi for offset in rgb_offsets])
     return 0.5 + 0.5 * np.cos(a)
 
 
 def run(config: MandelbrotConfig, save: bool):
     root = tk.Tk()
     root.iconbitmap(Path(__file__).parent / "brot.ico")
-    screen_size_prop = 0.6
+    screen_size_prop = 0.3
     config.height = round(root.winfo_screenheight() * screen_size_prop)
     config.width = round(root.winfo_screenwidth() * screen_size_prop)
 

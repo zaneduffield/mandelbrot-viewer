@@ -63,7 +63,7 @@ def main():
     parser.add_argument(
         "-g", "--gpu", action="store_true", help="Use GPU via opencl to render"
     )
-    parser.add_argument("-log", "--log-level", choices=["debug", "info", "warning"], default="info")
+    parser.add_argument("-log", "--log-level", choices=["debug", "info", "warning"], default="debug")
 
     args = parser.parse_args()
 

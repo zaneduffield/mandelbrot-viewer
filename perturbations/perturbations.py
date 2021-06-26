@@ -22,8 +22,7 @@ def iterate_ref(init_ref: mpc, iterations):
     ref = init_ref
     for i in range(iterations):
         temp = complex(ref)
-        temp_abs = temp.real * temp.real + temp.imag * temp.imag
-        if temp_abs > BREAKOUT_R2:
+        if temp.real * temp.real + temp.imag * temp.imag > BREAKOUT_R2:
             return ref_hist, i
 
         ref_hist[i] = temp
@@ -136,7 +135,6 @@ class PerturbationComputer:
 
         width_per_pixel = float((config.b_right.real - config.t_left.real) / config.width)
         height_per_pixel = float((-config.b_right.imag + config.t_left.imag) / config.height)
-        iterations_grid = np.zeros((config.height, config.width), dtype=np.int32)
         ref_coords = config.width // 2, config.height // 2
 
         def _ref_from_coords(coords: tuple):
@@ -180,19 +178,14 @@ class PerturbationComputer:
             )
 
             if config.gpu:
-                iterations_grid = self.cl.get_pixels(
-                    pertubation_state, fix_glitches=loops
-                )
-                glitched_count = get_glitched_count(pertubation_state, iterations_grid)
+                iterations_grid, points = self.cl.compute(pertubation_state, fix_glitches=bool(loops))
             else:
-                glitched_count = approximate_pixels(
-                    pertubation_state, iterations_grid, fix_glitches=loops
-                )
+                iterations_grid, points = approximate_pixels(pertubation_state, fix_glitches=bool(loops))
+            yield iterations_grid, points
 
-            yield iterations_grid
+            glitched_count = np.sum(iterations_grid == GLITCH_ITER)
             my_logger.debug(f"{glitched_count} pixels remaining")
             if glitched_count <= MAX_OK_GLITCH_COUNT:
-                my_logger.debug(f"min escape iterations: {np.min(np.max(iterations_grid, 0))}")
                 break
 
             ref_coords = get_new_ref(iterations_grid, config.width, config.height, GLITCH_ITER)
@@ -204,17 +197,17 @@ class PerturbationComputer:
 
 @njit(parallel=True)
 def get_new_ref(iterations_grid, width, height, blob_iter):
-    lo = [0, 0]
-    hi = [width, height]
+    lo = np.array([0, 0])
+    hi = np.array([width, height])
 
-    blob_counts = [0, 0]
-    while max(blob_counts) / ((hi[0] - lo[0]) * (hi[1] - lo[1])) < 0.499:
-        blob_counts = [0, 0]
+    blob_counts = np.array([0, 0])
+    while hi[0] != lo[0] and hi[1] != lo[1] and np.sum(blob_counts) / ((hi[0] - lo[0]) * (hi[1] - lo[1])) < 0.9:
+        blob_counts = np.array([0, 0])
 
         dim = int(hi[0] - lo[0] < hi[1] - lo[1])
         mid = (hi[dim] + lo[dim]) // 2
         for y in prange(lo[1], hi[1]):
-            for x in prange(lo[0], hi[0]):
+            for x in range(lo[0], hi[0]):
                 sector = int((x, y)[dim] > mid)
                 blob_counts[sector] += int(iterations_grid[y, x] == blob_iter)
 
@@ -275,7 +268,7 @@ class PerturbationCL(MandelbrotCL):
         with open(Path(__file__).parent / "mandelbrot_perturbations.cl") as f:
             super().compile(f.read())
 
-    def _compute_pixels(self, pert, fix_glitches):
+    def _compute(self, pert: PertubationState, fix_glitches):
         my_logger.debug("computing")
         terms_buf = cl.Buffer(
             self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.terms
@@ -288,9 +281,10 @@ class PerturbationCL(MandelbrotCL):
 
         self.prg.approximate_pixels(
             self.queue,
-            self.a.shape,
+            self.iterations_grid.shape,
             None,
-            self.abuf,
+            self.ibuf,
+            self.pbuf,
             np.float64(pert.w_per_pix),
             np.int32(pert.width),
             np.int32(pert.ref_coords[0]),
@@ -307,22 +301,10 @@ class PerturbationCL(MandelbrotCL):
             np.int32(BREAKOUT_R2)
         )
 
-    def get_pixels(self, pert, fix_glitches):
+    def compute(self, pert: PertubationState, fix_glitches: bool):
         with self.manage_buffer(pert.height, pert.width):
-            self._compute_pixels(pert, fix_glitches)
+            self._compute(pert, fix_glitches)
         return self.out
-
-
-@njit
-def search_for_escape(data, lo, hi, x, y):
-    while hi != lo:
-        mid = (lo + hi) // 2
-        point = data.precise_reference[mid] + get_estimate(data, x, y, mid)
-        if point.real * point.real + point.imag * point.imag <= BREAKOUT_R2:
-            lo = mid + 1
-        else:
-            hi = mid
-    return hi
 
 
 @njit
@@ -333,8 +315,7 @@ def get_delta(data, i, j):
 
 
 @njit
-def get_estimate(data, i, j, iteration):
-    init_delta = get_delta(data, i, j)
+def get_estimate(data, init_delta, iteration):
     scaled_delta = init_delta * data.scaling_factor
     out = 0
     for k in range(data.num_terms):
@@ -345,9 +326,10 @@ def get_estimate(data, i, j, iteration):
 
 
 @njit
-def approximate_pixel(data, x, y, iterations_grid):
-    delta_i = get_estimate(data, x, y, data.iter_accurate - 1)
+def approximate_pixel(data, x, y, iterations_grid, points):
     delta_0 = get_delta(data, x, y)
+    delta_i = get_estimate(data, delta_0, data.iter_accurate - 1)
+    point = 0
     this_breakout = 0
     for i in range(data.iter_accurate, data.breakout):
         x_i = data.precise_reference[i - 1]
@@ -356,9 +338,8 @@ def approximate_pixel(data, x, y, iterations_grid):
 
         if actual_size < 0.0000001 * (x_i.real * x_i.real + x_i.imag * x_i.imag):
             iterations_grid[y, x] = GLITCH_ITER
-            return -1
-
-        if actual_size <= BREAKOUT_R2:
+            return
+        elif actual_size <= BREAKOUT_R2:
             delta_i = (
                 2 * data.precise_reference[i - 1] * delta_i
                 + delta_i * delta_i
@@ -370,41 +351,32 @@ def approximate_pixel(data, x, y, iterations_grid):
 
     if this_breakout == 0:
         # broke out before iterating, find true breakout value using binary search on accurate estimations
-        iterations_grid[y, x] = search_for_escape(data, 0, data.iter_accurate, x, y) + 1
-    elif this_breakout == data.breakout:
-        if data.breakout < data.iterations:
-            iterations_grid[y, x] = GLITCH_ITER
-            return 1
-        else:
-            iterations_grid[y, x] = 0
+        lo, hi = 1, data.iter_accurate - 1
+        while hi != lo:
+            mid = (lo + hi) // 2
+            point = data.precise_reference[mid] + get_estimate(data, delta_0, mid)
+            if point.real * point.real + point.imag * point.imag <= BREAKOUT_R2:
+                lo = mid + 1
+            else:
+                hi = mid
+        iterations_grid[y, x] = hi + 1
+    elif this_breakout == data.breakout and data.breakout < data.iterations:
+        # fake 'glitch' because this point didn't break out before the reference
+        iterations_grid[y, x] = GLITCH_ITER
     else:
         iterations_grid[y, x] = this_breakout
-
-    return 0
+    points[y, x] = point
 
 
 @njit(parallel=True)
-def approximate_pixels(precision: PertubationState, iterations_grid, fix_glitches):
-    incomplete_count = 0
-    glitched_count = 0
+def approximate_pixels(state: PertubationState, fix_glitches: bool):
+    iterations_grid = np.zeros((state.height, state.width), dtype=np.int32)
+    points = np.zeros((state.height, state.width), dtype=np.complex128)
 
-    for y in prange(precision.height):
-        for x in range(precision.width):
+    for y in prange(state.height):
+        for x in range(state.width):
             if fix_glitches and iterations_grid[y, x] != GLITCH_ITER:
                 continue
-            result = approximate_pixel(precision, x, y, iterations_grid)
-            incomplete_count += int(result != 0)
-            glitched_count += int(result < 0)
+            approximate_pixel(state, x, y, iterations_grid, points)
 
-    return incomplete_count
-
-
-@njit
-def get_glitched_count(pert: PertubationState, iterations_grid):
-    count = 0
-    for y in range(pert.height):
-        for x in range(pert.width):
-            if iterations_grid[y, x] == GLITCH_ITER:
-                count += 1
-
-    return count
+    return iterations_grid, points

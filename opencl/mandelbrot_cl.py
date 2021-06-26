@@ -37,31 +37,33 @@ class MandelbrotCL:
     def set_arrays(self, height, width):
         if self.length != max(height, width):
             self.length = max(height, width)
-            self.a = np.zeros((self.length, self.length), dtype=np.int32, order="C")
-            self.abuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.a.nbytes)
+            self.iterations_grid = np.zeros((self.length, self.length), dtype=np.int32, order="C")
+            self.ibuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.iterations_grid.nbytes)
+            self.points_grid = np.zeros((self.length, self.length), dtype=np.complex128, order="C")
+            self.pbuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.points_grid.nbytes)
 
     def manage_buffer(self, height, width):
-        cl_class = self
+        obj = self
 
         class Manager(object):
             def __enter__(self):
-                cl_class.set_arrays(height, width)
+                obj.set_arrays(height, width)
 
             def __exit__(self, *args):
-                cl.enqueue_copy(cl_class.queue, cl_class.a, cl_class.abuf).wait()
-                cl_class.out = cl_class.a[:height, :width]
+                cl.enqueue_copy(obj.queue, obj.iterations_grid, obj.ibuf).wait()
+                cl.enqueue_copy(obj.queue, obj.points_grid, obj.pbuf).wait()
+                obj.out = obj.iterations_grid[:height, :width], obj.points_grid[:height, :width]
 
         return Manager()
 
-    def _compute_pixels(self, *args, **kwargs):
-        raise NotImplemented
-
-    def get_pixels(self, *args, **kwargs):
-        raise NotImplemented
-
     def __del__(self):
-        if self.abuf is not None:
-            self.abuf.release()
+        if self.ibuf is not None:
+            self.ibuf.release()
+        if self.pbuf is not None:
+            self.pbuf.release()
+
+    def compute(self, *args, **kwargs):
+        raise NotImplemented
 
 
 class ClassicMandelbrotCL(MandelbrotCL):
@@ -70,13 +72,14 @@ class ClassicMandelbrotCL(MandelbrotCL):
         with open(Path(__file__).parent / 'mandelbrot.cl') as f:
             super().compile(f.read())
 
-    def _compute_pixels(self, t_left: mpc, b_right: mpc, width, iterations):
+    def _compute(self, t_left: mpc, b_right: mpc, width, iterations):
         width_per_pix = float((b_right.real - t_left.real) / width)
         self.prg.pixel64(
             self.queue,
-            self.a.shape,
+            self.iterations_grid.shape,
             None,
-            self.abuf,
+            self.ibuf,
+            self.pbuf,
             np.complex128(t_left),
             np.float64(width_per_pix),
             np.int32(iterations),
@@ -85,7 +88,7 @@ class ClassicMandelbrotCL(MandelbrotCL):
             np.int32(BREAKOUT_R2)
         )
 
-    def get_pixels(self, config: MandelbrotConfig):
+    def compute(self, config: MandelbrotConfig):
         with self.manage_buffer(config.height, config.width):
-            self._compute_pixels(config.t_left, config.b_right, config.width, config.iterations)
+            self._compute(config.t_left, config.b_right, config.width, config.iterations)
         return self.out
