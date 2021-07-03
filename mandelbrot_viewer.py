@@ -9,7 +9,10 @@ from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 def make_cli_args(config: MandelbrotConfig):
     center = (config.b_right + config.t_left) / 2
     zoom = 2 / (config.b_right.real - config.t_left.real)
-    args = f'--center "{str(center.real)} {str(center.imag)}" -i {config.iterations} -z {zoom}'
+    args = (
+        f'--center "{str(center.real)} {str(center.imag)}" -z {zoom}'
+        f' -i {config.iterations} --height {config.height} --width {config.width}'
+    )
 
     if config.perturbation:
         args += " -p"
@@ -43,8 +46,9 @@ def main():
         help="zoom",
         default="0.5E+0",
     )
+    parser.add_argument("--height", type=int, default=0)
+    parser.add_argument("--width", type=int, default=0)
 
-    parser.add_argument("-w", "--width", type=int, help="The pixel width of the image.")
     parser.add_argument(
         "-s", "--save", action="store_true", help="Save the generated image."
     )
@@ -78,8 +82,8 @@ def main():
     b_right = center - half_diag
 
     config = MandelbrotConfig(
-        width=0,
-        height=0,
+        width=max(args.width, 0),
+        height=max(args.height, 0),
         t_left=t_left,
         b_right=b_right,
         iterations=args.iterations,

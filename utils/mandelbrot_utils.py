@@ -20,7 +20,7 @@ class MandelbrotConfig:
 
 
 def set_precision(width_per_pixel: mpfr):
-    get_context().precision = int(-log2(width_per_pixel))
+    get_context().precision = int(-log2(width_per_pixel) * 2)
 
 
 def set_precision_from_config(config: MandelbrotConfig):

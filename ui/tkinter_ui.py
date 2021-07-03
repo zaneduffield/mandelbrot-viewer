@@ -6,7 +6,7 @@ from typing import Tuple
 
 import numpy as np
 from PIL import Image, ImageTk
-from gmpy2 import mpc
+from gmpy2 import mpc, mpfr
 
 from mandelbrot.mandelbrot import Mandelbrot
 from mandelbrot_viewer import make_cli_args
@@ -83,9 +83,9 @@ class FractalUI(tk.Frame):
         self.fractal = Mandelbrot()
         self.compute_config = config
         self.save = save
-        config.t_left, config.b_right = self.expand_to_match_screen_ratio(config.t_left, config.b_right)
         self.set_corners(config.t_left, config.b_right)
         self.palette = generate_palette()
+        self.computing = False
         self.compute_and_draw()
 
     def copy_cli(self):
@@ -112,6 +112,9 @@ class FractalUI(tk.Frame):
         if height > MIN_IMAGE_HEIGHT:
             self.compute_config.height = height
 
+        self.compute_config.t_left, self.compute_config.b_right = \
+            self.expand_to_match_window_ratio(self.compute_config.t_left, self.compute_config.b_right)
+
     def reset(self):
         pop = None
         temp = self.fractal.back()
@@ -121,10 +124,10 @@ class FractalUI(tk.Frame):
 
         self.load(pop)
 
-    def load(self, pop: Tuple[MandelbrotConfig, np.array, np.array]):
+    def load(self, pop: Tuple[MandelbrotConfig, Tuple]):
         if pop is None:
             return
-        self.compute_config, *self.compute_result = pop
+        self.compute_config, self.compute_result = pop
         self.read_config()
         self.draw(self.compute_result)
 
@@ -176,26 +179,25 @@ class FractalUI(tk.Frame):
 
         t_left = t + hor_scale * t_left_coords[0] - ver_scale * t_left_coords[1] * 1j
         b_right = t + hor_scale * b_right_coords[0] - ver_scale * b_right_coords[1] * 1j
-        t_left, b_right = self.expand_to_match_screen_ratio(t_left, b_right)
+        t_left, b_right = self.expand_to_match_window_ratio(t_left, b_right)
         self.set_corners(t_left, b_right)
 
         t_left_diag, b_right_diag = t_left - t, b_right - t
         # self.crop_and_upscale(t_left_diag, b_right_diag, hor_scale, ver_scale)
 
-    def expand_to_match_screen_ratio(self, t_left: mpc, b_right: mpc):
+    def expand_to_match_window_ratio(self, t_left: mpc, b_right: mpc):
         height = t_left.imag - b_right.imag
         width = b_right.real - t_left.real
 
-        ratio_target = self.compute_config.height / self.compute_config.width
-        inverse_ratio_target = self.compute_config.width / self.compute_config.height
-        ratio_curr = height / width
+        ratio_target = mpfr(self.compute_config.height) / mpfr(self.compute_config.width)
+        ratio_curr = mpfr(height) / mpfr(width)
 
         if ratio_target > ratio_curr:
             diff = (width * ratio_target - height) / 2
             t_left += diff * 1j
             b_right -= diff * 1j
         else:
-            diff = (height * inverse_ratio_target - width) / 2
+            diff = (height / ratio_target - width) / 2
             t_left -= diff
             b_right += diff
 
@@ -211,9 +213,12 @@ class FractalUI(tk.Frame):
         self.compute_and_draw()
 
     def compute_and_draw(self):
+        if self.computing:
+            return
         threading.Thread(target=self.threaded_compute_and_draw).start()
 
     def threaded_compute_and_draw(self):
+        self.computing = True
         my_logger.info("-" * 80)
         start = time.time()
         self.write_config()
@@ -224,6 +229,7 @@ class FractalUI(tk.Frame):
         duration = time.time() - start
         my_logger.info("computation took {} seconds".format(round(duration, 2)))
         my_logger.info("-" * 80)
+        self.computing = False
 
     def crop_and_upscale(self, t_left_diag: mpc, b_right_diag: mpc, hor_scale, ver_scale):
         t_left_expanded_coords = (round(t_left_diag.real / hor_scale), round(-t_left_diag.imag / ver_scale))
@@ -265,7 +271,7 @@ class FractalUI(tk.Frame):
         cumulative_counts = np.cumsum(histogram)
         # rescale so the entire colour range is used (otherwise the first colour used would be offset)
         cumulative_counts = cumulative_counts - cumulative_counts[0]
-        relative_cumulative_counts = cumulative_counts[iterations] / cumulative_counts[-1]
+        relative_cumulative_counts = cumulative_counts[iterations] / max(1, cumulative_counts[-1])
 
         num_colours = self.palette.shape[0] - 1
         indices = np.minimum(num_colours, (num_colours * relative_cumulative_counts).astype(np.int32))
@@ -299,9 +305,11 @@ def generate_palette(rgb_offsets=None):
 def run(config: MandelbrotConfig, save: bool):
     root = tk.Tk()
     root.iconbitmap(Path(__file__).parent / "brot.ico")
-    screen_size_prop = 0.3
-    config.height = round(root.winfo_screenheight() * screen_size_prop)
-    config.width = round(root.winfo_screenwidth() * screen_size_prop)
+
+    if 0 in [config.height, config.width]:
+        screen_size_prop = 0.4
+        config.height = round(root.winfo_screenheight() * screen_size_prop)
+        config.width = round(root.winfo_screenwidth() * screen_size_prop)
 
     set_precision_from_config(config)
     FractalUI(

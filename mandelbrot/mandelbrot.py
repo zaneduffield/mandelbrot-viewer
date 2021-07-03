@@ -1,6 +1,6 @@
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 from numba import njit, prange
@@ -11,8 +11,12 @@ from utils.constants import BREAKOUT_R2, NUM_PROBES, NUM_SERIES_TERMS
 from utils.mandelbrot_utils import MandelbrotConfig
 
 
+def mandelbrot(config: MandelbrotConfig):
+    return _mandelbrot(complex(config.t_left), complex(config.b_right), config.height, config.width, config.iterations)
+
+
 @njit(fastmath=True, parallel=True, nogil=True)
-def mandelbrot(t_left, b_right, height, width, max_iter):
+def _mandelbrot(t_left, b_right, height, width, max_iter):
     iterations_grid = np.zeros((height, width), dtype=np.int32)
     final_points = np.zeros((height, width), dtype=np.complex128)
     t_left_r = t_left.real
@@ -42,8 +46,7 @@ def mandelbrot(t_left, b_right, height, width, max_iter):
 @dataclass()
 class Node:
     config: MandelbrotConfig
-    iteration_grid: np.array
-    final_points: np.array
+    output: Tuple
     parent: 'Node'
     children: List['Node'] = field(default_factory=list)
 
@@ -64,8 +67,8 @@ class Mandelbrot:
             self._perturbations_computer = PerturbationComputer()
         return self._perturbations_computer
 
-    def push(self, config: MandelbrotConfig, iteration_grid: np.array, final_points: np.array):
-        node = Node(config, iteration_grid, final_points, self.history)
+    def push(self, config: MandelbrotConfig, output):
+        node = Node(config, output, self.history)
         if self.history is not None:
             self.history.children.append(node)
         self.history = node
@@ -73,29 +76,27 @@ class Mandelbrot:
     def back(self):
         if self.history is None:
             return
-        out = self.history.parent
-        if out is not None:
-            self.history = out
-            return deepcopy(out.config), out.iteration_grid, out.final_points
+        prev = self.history.parent
+        if prev is not None:
+            self.history = prev
+            return deepcopy(prev.config), prev.output
 
     def next(self):
         if self.history.children:
             self.history = self.history.children[-1]
-            return deepcopy(self.history.config), self.history.iteration_grid
+            return deepcopy(self.history.config), self.history.output
 
     def compute(self, config: MandelbrotConfig):
-        iteration_grid, final_points = None, None
+        output = (None, None)
         if config.perturbation:
-            for iteration_grid, final_points in self.get_pert().compute(config, NUM_PROBES, NUM_SERIES_TERMS):
-                yield iteration_grid, final_points
+            for output in self.get_pert().compute(config, NUM_PROBES, NUM_SERIES_TERMS):
+                yield output
         elif config.gpu:
-            iteration_grid, final_points = self.get_cl().compute(config)
+            output = self.get_cl().compute(config)
         else:
-            iteration_grid, final_points = mandelbrot(complex(config.t_left), complex(config.b_right), config.height,
-                                                      config.width,
-                                                      config.iterations)
-        if config.gpu:
-            iteration_grid, final_points = deepcopy(iteration_grid), deepcopy(final_points)
+            output = mandelbrot(config)
 
-        self.push(deepcopy(config), iteration_grid, final_points)
-        yield iteration_grid, final_points
+        if config.gpu:
+            output = deepcopy(output)
+        self.push(deepcopy(config), output)
+        yield output
