@@ -7,8 +7,8 @@ from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 
 def make_cli_args(config: MandelbrotConfig):
-    center = (config.b_right + config.t_left) / 2
-    zoom = 2 / (config.b_right.real - config.t_left.real)
+    center = (config.b_right() + config.t_left()) / 2
+    zoom = 2 / (config.b_right().real - config.t_left().real)
     args = (
         f'--center "{str(center.real)} {str(center.imag)}" -z {zoom:.4e}'
         f' -i {config.max_iterations} --height {config.image_height} --width {config.image_width}'

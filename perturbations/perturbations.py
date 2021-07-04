@@ -1,10 +1,11 @@
 import math
 import random
+import time
 from pathlib import Path
 
 import numpy as np
 from gmpy2 import mpc
-from numba import njit, prange, float64, complex128, int32
+from numba import njit, prange, float64, complex128, int32, jit
 from numba.experimental import jitclass
 
 from opencl.mandelbrot_cl import MandelbrotCL, cl
@@ -18,6 +19,7 @@ from utils.constants import (
 from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 
+@jit(forceobj=True)
 def iterate_ref(init_ref: mpc, iterations):
     ref_hist = np.zeros(iterations, dtype=np.complex_)
     ref = init_ref
@@ -36,21 +38,26 @@ def iterate_ref(init_ref: mpc, iterations):
 def iterate_series_constants(
     ref_hist,
     ref_escaped_at: int,
-    probe_deltas_init,
+    probe_deltas,
     terms,
     num_terms: int,
     scaling_factor: float,
 ):
     """
-    The error threshold has a huge impact on the correctness of the series approximation, and it needs to decrease
-    as we zoom in further. Pretty much no matter how hard we try this won't be good enough in all cases and glitches
+    The error tolerance has a huge impact on the correctness of the series approximation
+    Pretty much no matter how hard we try this won't be good enough in all cases and glitches
     will slip through. There are more advanced techniques for detecting when the series approximation is no longer
     accurate but I don't understand them yet.
     """
-    min_init_delta = np.median(np.abs(probe_deltas_init))
-    error_threshold = 1 / min_init_delta**2
+    tolerance = 1 / np.power(2, 48)
 
-    probe_deltas_cur = probe_deltas_init.copy()
+    scaled_delta_powers = np.zeros((len(probe_deltas), num_terms), dtype=np.complex128)
+    for j in range(len(probe_deltas)):
+        scaled_delta_powers[j, 0] = probe_deltas[j] * scaling_factor
+        for k in range(1, num_terms):
+            scaled_delta_powers[j, k] = scaled_delta_powers[j, k - 1] * scaled_delta_powers[j, 0]
+
+    # This acts to reduce the size of our series terms and is reversed when computing using them
     terms[0][0] = 1 / scaling_factor
     for i in range(1, num_terms):
         terms[i][0] = 0
@@ -67,22 +74,13 @@ def iterate_series_constants(
             if not np.isnan(new_term):
                 terms[j][i + 1] = new_term
 
-        for j in range(len(probe_deltas_init)):
-            delta = probe_deltas_cur[j]
-            probe_deltas_cur[j] = (
-                2 * z_comp * delta + delta * delta + probe_deltas_init[j]
-            )
-
-            z_del_app = 0
-            scaled_delta = probe_deltas_init[j] * scaling_factor
+        for j in range(len(scaled_delta_powers)):
+            last = 1 / tolerance
             for k in range(num_terms):
-                term = terms[k][i + 1]
-                z_del_app += term * scaled_delta
-                scaled_delta *= probe_deltas_init[j] * scaling_factor
-
-            diff = probe_deltas_cur[j] - z_del_app
-            if np.abs(diff) > error_threshold:
+                term = np.abs(terms[k][i + 1] * scaled_delta_powers[j][k])
+                if last * tolerance < term:
                     return i
+                last = term
 
     return ref_escaped_at
 
@@ -115,7 +113,7 @@ def compute_series_constants(
     p_deltas_init = get_probe_deltas(t_left, b_right, ref_init, num_probes)
     terms = np.zeros((num_terms, iterations + 1), dtype=np.complex_, order="F")
 
-    scaling_factor = np.log2(float(1 / (b_right.real - t_left.real)))
+    scaling_factor = (float(1 / (b_right.real - t_left.real)))
     accurate_iters = iterate_series_constants(
         ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms, scaling_factor
     )
@@ -149,9 +147,12 @@ class PerturbationComputer:
         loops = 0
         while loops <= MAX_GLITCH_FIX_LOOPS:
             ref = _ref_from_coords(ref_coords)
+            start = time.time()
             my_logger.debug("iterating reference")
             ref_hist, ref_escaped_at = iterate_ref(ref, config.max_iterations)
+            my_logger.debug(f"iterating reference took {time.time() - start} seconds")
             my_logger.debug("computing series constants...")
+            start = time.time()
             terms, iter_accurate, scaling_factor = compute_series_constants(
                 config.t_left(),
                 config.b_right(),
@@ -162,6 +163,7 @@ class PerturbationComputer:
                 num_series_terms,
                 num_probes,
             )
+            my_logger.debug(f"series constants took {time.time() - start} seconds")
 
             my_logger.debug(f"proceeding with {iter_accurate} reference iterations")
             my_logger.debug(f"reference broke out at {ref_escaped_at}")
