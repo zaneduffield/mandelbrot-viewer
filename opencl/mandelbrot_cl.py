@@ -91,6 +91,6 @@ class ClassicMandelbrotCL(MandelbrotCL):
         )
 
     def compute(self, config: MandelbrotConfig):
-        with self.manage_buffer(config.height, config.width):
-            self._compute(config.t_left, config.b_right, config.width, config.height, config.iterations)
+        with self.manage_buffer(config.image_height, config.image_width):
+            self._compute(config.t_left(), config.b_right(), config.image_width, config.image_height, config.max_iterations)
         return self.out

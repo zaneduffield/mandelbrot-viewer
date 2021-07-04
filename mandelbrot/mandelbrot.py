@@ -12,7 +12,7 @@ from utils.mandelbrot_utils import MandelbrotConfig
 
 
 def mandelbrot(config: MandelbrotConfig):
-    return _mandelbrot(complex(config.t_left), complex(config.b_right), config.height, config.width, config.iterations)
+    return _mandelbrot(complex(config.t_left()), complex(config.b_right()), config.image_height, config.image_width, config.max_iterations)
 
 
 @njit(fastmath=True, parallel=True, nogil=True)

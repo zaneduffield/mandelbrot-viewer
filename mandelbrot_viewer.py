@@ -10,8 +10,8 @@ def make_cli_args(config: MandelbrotConfig):
     center = (config.b_right + config.t_left) / 2
     zoom = 2 / (config.b_right.real - config.t_left.real)
     args = (
-        f'--center "{str(center.real)} {str(center.imag)}" -z {zoom}'
-        f' -i {config.iterations} --height {config.height} --width {config.width}'
+        f'--center "{str(center.real)} {str(center.imag)}" -z {zoom:.4e}'
+        f' -i {config.max_iterations} --height {config.image_height} --width {config.image_width}'
     )
 
     if config.perturbation:
@@ -74,23 +74,15 @@ def main():
     my_logger.setLevel(args.log_level.upper())
 
     get_context().precision = int(len(args.center) * 3.32)  # log2(10) ~= 3.32
-    width = 2 / mpfr(args.zoom)
-    center = mpc(args.center)
-
-    half_diag = (width / 2) * (-1 + 1j)
-    t_left = center + half_diag
-    b_right = center - half_diag
 
     config = MandelbrotConfig(
-        width=max(args.width, 0),
-        height=max(args.height, 0),
-        t_left=t_left,
-        b_right=b_right,
-        iterations=args.iterations,
+        image_width=max(args.width, 0),
+        image_height=max(args.height, 0),
+        max_iterations=args.iterations,
         perturbation=args.perturbation,
         gpu=args.gpu,
-        num_series_terms=10,
     )
+    config.set_center_and_zoom(center = mpc(args.center), zoom = mpfr(args.zoom))
 
     tkinter_ui.run(config, args.save)
 

@@ -12,7 +12,7 @@ from mandelbrot.mandelbrot import Mandelbrot
 from mandelbrot_viewer import make_cli_args
 from opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
 from utils.constants import BREAKOUT_R2, GLITCH_ITER
-from utils.mandelbrot_utils import MandelbrotConfig, set_precision_from_config, my_logger
+from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 BROT_COLOUR = (0, 0, 0)
 GLITCH_COLOUR = BROT_COLOUR
@@ -33,6 +33,15 @@ class FractalUI(tk.Frame):
         self.parent = parent
         self.parent.title("Mandelbrot")
 
+        top_ui = tk.Frame(self)
+        bottom_ui = tk.Frame(self)
+        top_ui.pack(side=tk.TOP, fill=tk.X)
+        bottom_ui.pack(side=tk.BOTTOM, fill=tk.X)
+
+        tr_controls = tk.Frame(top_ui)
+        tl_controls = tk.Frame(top_ui)
+        pertubation_controls = tk.Frame(top_ui)
+
         self.perturbation = tk.BooleanVar(value=config.perturbation)
         self.gpu = tk.BooleanVar(value=config.gpu and PY_OPEN_CL_INSTALLED)
 
@@ -42,37 +51,36 @@ class FractalUI(tk.Frame):
         self.image_canvas.pack(side=tk.BOTTOM, expand=True, fill=tk.BOTH)
         self.canvas_image = None
 
-        ui = tk.Frame(self)
-        ui.pack(side=tk.TOP, fill=tk.X)
+        tr_controls.pack(side=tk.RIGHT)
+        tl_controls.pack(side=tk.LEFT)
+        pertubation_controls.pack(side=tk.LEFT)
 
-        r_controls = tk.Frame(ui)
-        l_controls = tk.Frame(ui)
-        pertubation_controls = tk.Frame(ui)
+        tk.Button(tl_controls, command=self.recompute, text="recompute").pack(side=tk.RIGHT)
 
-        r_controls.pack(side=tk.RIGHT)
-        pertubation_controls.pack(side=tk.RIGHT)
-        l_controls.pack(side=tk.LEFT)
+        self.zoom = tk.StringVar()
+        self.write_zoom_entry(config.get_zoom())
+        self.zoom_entry = tk.Entry(tl_controls, textvariable=self.zoom, width=10, bd=3)
+        self.zoom_entry.bind("<Return>", lambda _: self.compute_and_draw())
+        self.zoom_entry.pack(side=tk.LEFT)
 
-        tk.Button(l_controls, command=self.recompute, text="recompute").pack(side=tk.RIGHT)
-
-        tk.Label(l_controls, text="Max iterations", height=1).pack(side=tk.LEFT)
-        self.iterations = tk.StringVar(value=config.iterations)
-        iter_entry = tk.Entry(l_controls, textvariable=self.iterations, width=10)
+        tk.Label(tl_controls, text="Max iterations", height=1).pack(side=tk.LEFT)
+        self.max_iterations = tk.StringVar(value=config.max_iterations)
+        iter_entry = tk.Entry(tl_controls, textvariable=self.max_iterations, width=13, bd=3)
         iter_entry.bind("<Return>", lambda _: self.compute_and_draw())
         iter_entry.pack(side=tk.LEFT)
 
-        tk.Button(r_controls, command=self.copy_cli, text="copy CLI").pack(side=tk.RIGHT)
-        self.mag = tk.Text(r_controls, height=1, width=20, state=tk.DISABLED)
-        self.mag.pack(side=tk.RIGHT)
-        tk.Button(r_controls, command=self.reset, text="reset").pack(side=tk.RIGHT)
-        tk.Button(r_controls, command=self.back, text="prev").pack(side=tk.RIGHT)
-        tk.Button(r_controls, command=self.next, text="next").pack(side=tk.RIGHT)
-        tk.Button(r_controls, command=self.recolour, text="recolour").pack(side=tk.RIGHT)
+        tk.Button(tr_controls, command=self.copy_cli, text="copy CLI").pack(side=tk.RIGHT)
+
+
+        tk.Button(bottom_ui, command=self.reset, text="reset").pack(side=tk.RIGHT)
+        tk.Button(bottom_ui, command=self.back, text="prev").pack(side=tk.RIGHT)
+        tk.Button(bottom_ui, command=self.next, text="next").pack(side=tk.RIGHT)
+        tk.Button(bottom_ui, command=self.recolour, text="recolour").pack(side=tk.LEFT)
         tk.Checkbutton(
             pertubation_controls, text="high precision", variable=self.perturbation
         ).pack(side=tk.RIGHT)
         gpu_checkbox_state = tk.NORMAL if PY_OPEN_CL_INSTALLED else tk.DISABLED
-        tk.Checkbutton(r_controls, text="gpu", variable=self.gpu, state=gpu_checkbox_state).pack(side=tk.RIGHT)
+        tk.Checkbutton(tl_controls, text="gpu", variable=self.gpu, state=gpu_checkbox_state).pack(side=tk.RIGHT)
 
         self.pack(fill=tk.BOTH, expand=True)
 
@@ -83,7 +91,6 @@ class FractalUI(tk.Frame):
         self.fractal = Mandelbrot()
         self.compute_config = config
         self.save = save
-        self.set_corners(config.t_left, config.b_right)
         self.palette = generate_palette()
         self.computing = False
         self.compute_and_draw()
@@ -97,23 +104,24 @@ class FractalUI(tk.Frame):
         self.draw(self.compute_result)
 
     def read_config(self):
-        self.iterations.set(self.compute_config.iterations)
+        self.max_iterations.set(self.compute_config.max_iterations)
         self.perturbation.set(self.compute_config.perturbation)
         self.gpu.set(self.compute_config.gpu)
+        self.write_zoom_entry(self.compute_config.get_zoom())
 
     def write_config(self):
-        self.compute_config.iterations = int(self.iterations.get())
+        self.compute_config.max_iterations = int(self.max_iterations.get())
         self.compute_config.perturbation = self.perturbation.get()
         self.compute_config.gpu = self.gpu.get()
-        width = self.image_canvas.winfo_width()
-        if width > MIN_IMAGE_WIDTH:
-            self.compute_config.width = width
-        height = self.image_canvas.winfo_height()
-        if height > MIN_IMAGE_HEIGHT:
-            self.compute_config.height = height
+        self.set_zoom()
+        width = max(MIN_IMAGE_WIDTH, self.image_canvas.winfo_width())
+        height = max(MIN_IMAGE_HEIGHT, self.image_canvas.winfo_height())
+        self.compute_config.set_image_dimensions(width, height)
 
-        self.compute_config.t_left, self.compute_config.b_right = \
-            self.expand_to_match_window_ratio(self.compute_config.t_left, self.compute_config.b_right)
+    def set_zoom(self):
+        # validate zoom
+        zoom_text = self.zoom.get()
+        self.compute_config.set_zoom(mpfr(zoom_text))
 
     def reset(self):
         pop = None
@@ -137,76 +145,44 @@ class FractalUI(tk.Frame):
     def next(self):
         self.load(self.fractal.next())
 
-    def set_mag(self):
-        self.mag.config(state=tk.NORMAL)
-        width = self.compute_config.b_right.real - self.compute_config.t_left.real
-        self.mag.replace("1.0", "1.end", f"width: {width:.2e}")
-        self.mag.config(state=tk.DISABLED)
+    def write_zoom_entry(self, zoom: mpfr):
+        self.zoom.set(f"{zoom:.3e}")
 
     def on_button_press(self, event):
-        self.start_click = (event.x, event.y)
+        self.start_click = event
 
     def on_move_press(self, event):
         # expand rectangle as you drag the mouse
+        dw = abs(event.x - self.start_click.x)
+        dh = round(dw * self.compute_config.image_height / self.compute_config.image_width)
+        t_left = (self.start_click.x - dw, self.start_click.y - dh)
+        b_right = (self.start_click.x + dw, self.start_click.y + dh)
+        rect_coords = (*t_left, *b_right)
         if self.rect is None:
             self.rect = self.image_canvas.create_rectangle(
-                self.start_click[0], self.start_click[1], 1, 1, fill=""
+                *rect_coords, fill=""
             )
-
-        self.image_canvas.coords(
-            self.rect, self.start_click[0], self.start_click[1], event.x, event.y
-        )
+        else:
+            self.image_canvas.coords(self.rect, *rect_coords)
 
     def on_button_release(self, event):
         if self.rect is None:
             return
 
-        x = self.image_canvas.coords(self.rect)
-        t_left_coords = (min(x[0], x[2]), min(x[1], x[3]))
-        b_right_coords = (max(x[0], x[2]), max(x[1], x[3]))
+        coords = self.image_canvas.coords(self.rect)
+        new_pix_width = coords[2] - coords[0]
 
-        self.reposition(t_left_coords, b_right_coords)
+        canvas_center_x = self.image_canvas.winfo_width() / 2
+        canvas_center_y = self.image_canvas.winfo_height() / 2
+        diff = (self.start_click.x - canvas_center_x) + 1j * (canvas_center_y - self.start_click.y)
+        width_per_pix = self.compute_config.get_width() / self.image_canvas.winfo_width()
+        self.compute_config.set_center(self.compute_config.get_center() + width_per_pix * diff)
+        self.compute_config.set_zoom_from_width(new_pix_width * width_per_pix)
+
         self.image_canvas.delete(self.rect)
+        self.write_zoom_entry(self.compute_config.get_zoom())
         self.rect = None
         self.compute_and_draw()
-
-    def reposition(self, t_left_coords: tuple, b_right_coords: tuple):
-        b = self.compute_config.b_right
-        t = self.compute_config.t_left
-
-        hor_scale = (b.real - t.real) / self.compute_config.width
-        ver_scale = (t.imag - b.imag) / self.compute_config.height
-
-        t_left = t + hor_scale * t_left_coords[0] - ver_scale * t_left_coords[1] * 1j
-        b_right = t + hor_scale * b_right_coords[0] - ver_scale * b_right_coords[1] * 1j
-        t_left, b_right = self.expand_to_match_window_ratio(t_left, b_right)
-        self.set_corners(t_left, b_right)
-
-        t_left_diag, b_right_diag = t_left - t, b_right - t
-        # self.crop_and_upscale(t_left_diag, b_right_diag, hor_scale, ver_scale)
-
-    def expand_to_match_window_ratio(self, t_left: mpc, b_right: mpc):
-        height = t_left.imag - b_right.imag
-        width = b_right.real - t_left.real
-
-        ratio_target = mpfr(self.compute_config.height) / mpfr(self.compute_config.width)
-        ratio_curr = mpfr(height) / mpfr(width)
-
-        if ratio_target > ratio_curr:
-            diff = (width * ratio_target - height) / 2
-            t_left += diff * 1j
-            b_right -= diff * 1j
-        else:
-            diff = (height / ratio_target - width) / 2
-            t_left -= diff
-            b_right += diff
-
-        return t_left, b_right
-
-    def set_corners(self, t_left: mpc, b_right: mpc):
-        self.compute_config.t_left, self.compute_config.b_right = t_left, b_right
-        self.set_mag()
-        set_precision_from_config(self.compute_config)
 
     def recompute(self):
         self.fractal.back()
@@ -258,8 +234,8 @@ class FractalUI(tk.Frame):
         # iterations = iterations[:]  # to prevent mutation
 
         # make perturbation glitches appear like brot points
-        iterations = iterations + (iterations == GLITCH_ITER).astype(np.int32) * self.compute_config.iterations
-        brot_pixels = iterations == self.compute_config.iterations
+        iterations = iterations + (iterations == GLITCH_ITER).astype(np.int32) * self.compute_config.max_iterations
+        brot_pixels = iterations == self.compute_config.max_iterations
 
         iterations = convert_to_fractional_counts(iterations, points).astype(np.int64)
         # rescale to 0 so we can use the values as indices to the cumulative counts
@@ -306,16 +282,16 @@ def run(config: MandelbrotConfig, save: bool):
     root = tk.Tk()
     root.iconbitmap(Path(__file__).parent / "brot.ico")
 
-    if 0 in [config.height, config.width]:
+    if 0 in [config.image_height, config.image_width]:
         screen_size_prop = 0.4
-        config.height = round(root.winfo_screenheight() * screen_size_prop)
-        config.width = round(root.winfo_screenwidth() * screen_size_prop)
+        config.set_image_dimensions(
+            round(root.winfo_screenwidth() * screen_size_prop), round(root.winfo_screenheight() * screen_size_prop)
+        )
 
-    set_precision_from_config(config)
     FractalUI(
         parent=root,
         config=config,
         save=save
     )
-    root.geometry("{}x{}".format(config.width, config.height))
+    root.geometry("{}x{}".format(config.image_width, config.image_height))
     root.mainloop()

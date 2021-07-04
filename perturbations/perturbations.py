@@ -15,7 +15,7 @@ from utils.constants import (
     BREAKOUT_R2,
     GLITCH_DIFF_THRESHOLD,
 )
-from utils.mandelbrot_utils import MandelbrotConfig, my_logger, set_precision_from_config
+from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 
 def iterate_ref(init_ref: mpc, iterations):
@@ -82,7 +82,7 @@ def iterate_series_constants(
 
             diff = probe_deltas_cur[j] - z_del_app
             if np.abs(diff) > error_threshold:
-                return i
+                    return i
 
     return ref_escaped_at
 
@@ -132,33 +132,33 @@ class PerturbationComputer:
         num_probes,
         num_series_terms,
     ):
-        set_precision_from_config(config)
+        config.set_precision()
 
-        width_per_pixel = (config.b_right.real - config.t_left.real) / config.width
-        height_per_pixel = (-config.b_right.imag + config.t_left.imag) / config.height
-        ref_coords = config.width // 2, config.height // 2
+        width_per_pixel = (config.b_right().real - config.t_left().real) / config.image_width
+        height_per_pixel = (-config.b_right().imag + config.t_left().imag) / config.image_height
+        ref_coords = config.image_width // 2, config.image_height // 2
 
         def _ref_from_coords(coords: tuple):
-            return config.t_left + coords[0] * width_per_pixel - coords[1] * height_per_pixel * 1j
+            return config.t_left() + coords[0] * width_per_pixel - coords[1] * height_per_pixel * 1j
 
         if config.gpu and self.cl is None:
             self.cl = PerturbationCL()
 
-        iterations_grid = np.zeros((config.height, config.width), dtype=np.int32)
-        points = np.zeros((config.height, config.width), dtype=np.complex128)
+        iterations_grid = np.zeros((config.image_height, config.image_width), dtype=np.int32)
+        points = np.zeros((config.image_height, config.image_width), dtype=np.complex128)
         loops = 0
         while loops <= MAX_GLITCH_FIX_LOOPS:
             ref = _ref_from_coords(ref_coords)
             my_logger.debug("iterating reference")
-            ref_hist, ref_escaped_at = iterate_ref(ref, config.iterations)
+            ref_hist, ref_escaped_at = iterate_ref(ref, config.max_iterations)
             my_logger.debug("computing series constants...")
             terms, iter_accurate, scaling_factor = compute_series_constants(
-                config.t_left,
-                config.b_right,
+                config.t_left(),
+                config.b_right(),
                 ref,
                 ref_hist,
                 ref_escaped_at,
-                config.iterations,
+                config.max_iterations,
                 num_series_terms,
                 num_probes,
             )
@@ -169,15 +169,15 @@ class PerturbationComputer:
             pertubation_state = PertubationState(
                 float(width_per_pixel),
                 float(height_per_pixel),
-                config.width,
-                config.height,
+                config.image_width,
+                config.image_height,
                 np.array(ref_coords, dtype=np.int32),
                 terms,
                 num_series_terms,
                 ref_escaped_at,
                 ref_hist,
                 iter_accurate,
-                config.iterations,
+                config.max_iterations,
                 scaling_factor,
             )
 
@@ -192,9 +192,9 @@ class PerturbationComputer:
             if glitched_count <= MAX_OK_GLITCH_COUNT:
                 break
 
-            ref_coords = get_new_ref(iterations_grid, config.width, config.height, GLITCH_ITER)
+            ref_coords = get_new_ref(iterations_grid, config.image_width, config.image_height, GLITCH_ITER)
             if ref_coords is None:
-                ref_coords = random.randint(0, config.width), random.randint(0, config.height)
+                ref_coords = random.randint(0, config.image_width), random.randint(0, config.image_height)
             my_logger.debug(f"new ref at :{ref_coords}")
             loops += 1
 
