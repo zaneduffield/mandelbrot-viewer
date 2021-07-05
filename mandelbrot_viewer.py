@@ -20,6 +20,9 @@ def make_cli_args(config: MandelbrotConfig):
     if config.gpu:
         args += " -g"
 
+    if config.gpu_double_precision:
+        args += " -gd"
+
     return args
 
 
@@ -65,8 +68,9 @@ def main():
         help="Use perturbation theory for high precision computation.",
     )
     parser.add_argument(
-        "-g", "--gpu", action="store_true", help="Use GPU via opencl to render"
+        "-g", "--gpu", action="store_true", help="Use GPU via OpenCL to render"
     )
+    parser.add_argument("-gd", "--gpu-double", action="store_true", help="Use double precision in OpenCL")
     parser.add_argument("-log", "--log-level", choices=["debug", "info", "warning"], default="debug")
 
     args = parser.parse_args()
@@ -81,6 +85,7 @@ def main():
         max_iterations=args.iterations,
         perturbation=args.perturbation,
         gpu=args.gpu,
+        gpu_double_precision=args.gpu_double
     )
     config.set_center_and_zoom(center = mpc(args.center), zoom = mpfr(args.zoom))
 

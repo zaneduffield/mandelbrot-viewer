@@ -21,7 +21,7 @@ from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 @jit(forceobj=True)
 def iterate_ref(init_ref: mpc, iterations):
-    ref_hist = np.zeros(iterations, dtype=np.complex_)
+    ref_hist = np.zeros(iterations, dtype=np.complex128)
     ref = init_ref
     for i in range(iterations):
         temp = complex(ref)
@@ -184,7 +184,7 @@ class PerturbationComputer:
             )
 
             if config.gpu:
-                iterations_grid, points = self.cl.compute(pertubation_state, fix_glitches=bool(loops))
+                iterations_grid, points = self.cl.compute(pertubation_state, fix_glitches=bool(loops), double_precision=config.gpu_double_precision)
             else:
                 approximate_pixels(iterations_grid, points, pertubation_state, fix_glitches=bool(loops))
             yield iterations_grid, points
@@ -272,20 +272,22 @@ class PertubationState:
 
 
 class PerturbationCL(MandelbrotCL):
-    def __init__(self):
-        super().__init__()
+    def get_program_contents(self):
         with open(Path(__file__).parent / "mandelbrot_perturbations.cl") as f:
-            super().compile(f.read())
+            return f.read()
 
     def _compute(self, pert: PertubationState, fix_glitches):
         my_logger.debug("computing")
+        real_dtype = self._get_real_dtype()
+        complex_dtype = self._get_complex_dtype()
+
         terms_buf = cl.Buffer(
-            self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.terms
+            self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=pert.terms.astype(complex_dtype)
         )
         precise_ref_buf = cl.Buffer(
             self.ctx,
             self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
-            hostbuf=pert.precise_reference,
+            hostbuf=pert.precise_reference.astype(complex_dtype),
         )
 
         self.prg.approximate_pixels(
@@ -294,25 +296,26 @@ class PerturbationCL(MandelbrotCL):
             None,
             self.ibuf,
             self.pbuf,
-            np.float64(pert.w_per_pix),
-            np.float64(pert.h_per_pix),
+            real_dtype(pert.w_per_pix),
+            real_dtype(pert.h_per_pix),
             np.int32(pert.width),
             np.int32(pert.ref_coords[0]),
             np.int32(pert.ref_coords[1]),
             terms_buf,
             np.int32(pert.num_terms),
-            np.float32(pert.scaling_factor),
+            real_dtype(pert.scaling_factor),
             np.int32(pert.breakout),
             precise_ref_buf,
             np.int32(pert.iter_accurate),
             np.int32(pert.max_iterations),
             np.int32(GLITCH_ITER),
-            np.float32(GLITCH_DIFF_THRESHOLD),
+            real_dtype(GLITCH_DIFF_THRESHOLD),
             np.int32(fix_glitches),
             np.int32(BREAKOUT_R2)
         )
 
-    def compute(self, pert: PertubationState, fix_glitches: bool):
+    def compute(self, pert: PertubationState, fix_glitches: bool, double_precision: bool):
+        self.set_precision(double_precision)
         with self.manage_buffer(pert.height, pert.width):
             self._compute(pert, fix_glitches)
         return self.out

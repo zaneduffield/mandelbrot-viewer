@@ -44,6 +44,7 @@ class FractalUI(tk.Frame):
 
         self.perturbation = tk.BooleanVar(value=config.perturbation)
         self.gpu = tk.BooleanVar(value=config.gpu and PY_OPEN_CL_INSTALLED)
+        self.gpu_double_precision = tk.BooleanVar(value=config.gpu_double_precision)
 
         self.start_click = None
         self.rect = None
@@ -81,6 +82,7 @@ class FractalUI(tk.Frame):
         ).pack(side=tk.RIGHT)
         gpu_checkbox_state = tk.NORMAL if PY_OPEN_CL_INSTALLED else tk.DISABLED
         tk.Checkbutton(tl_controls, text="gpu", variable=self.gpu, state=gpu_checkbox_state).pack(side=tk.RIGHT)
+        tk.Checkbutton(tl_controls, text="gpu double precision", variable=self.gpu_double_precision, state=gpu_checkbox_state).pack(side=tk.RIGHT)
 
         self.pack(fill=tk.BOTH, expand=True)
 
@@ -107,12 +109,14 @@ class FractalUI(tk.Frame):
         self.max_iterations.set(self.compute_config.max_iterations)
         self.perturbation.set(self.compute_config.perturbation)
         self.gpu.set(self.compute_config.gpu)
+        self.gpu_double_precision.set(self.compute_config.gpu_double_precision)
         self.write_zoom_entry(self.compute_config.get_zoom())
 
     def write_config(self):
         self.compute_config.max_iterations = int(self.max_iterations.get())
         self.compute_config.perturbation = self.perturbation.get()
         self.compute_config.gpu = self.gpu.get()
+        self.compute_config.gpu_double_precision = self.gpu_double_precision.get()
         self.set_zoom()
         width = max(MIN_IMAGE_WIDTH, self.image_canvas.winfo_width())
         height = max(MIN_IMAGE_HEIGHT, self.image_canvas.winfo_height())
