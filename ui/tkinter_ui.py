@@ -8,14 +8,13 @@ import numpy as np
 from PIL import Image, ImageTk
 from gmpy2 import mpc, mpfr
 
-from mandelbrot.mandelbrot import Mandelbrot
+from mandelbrot.mandelbrot import Mandelbrot, convert_to_fractional_counts
 from mandelbrot_viewer import make_cli_args
 from opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
+from ui.colouring import histogram_colouring, generate_palette
 from utils.constants import BREAKOUT_R2, GLITCH_ITER
 from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
-BROT_COLOUR = (0, 0, 0)
-GLITCH_COLOUR = BROT_COLOUR
 REF_COLOUR = (255, 0, 0)
 MIN_IMAGE_WIDTH = 10
 MIN_IMAGE_HEIGHT = 10
@@ -235,30 +234,12 @@ class FractalUI(tk.Frame):
 
     def draw(self, result):
         iterations, points = result
-        # iterations = iterations[:]  # to prevent mutation
-
         # make perturbation glitches appear like brot points
         iterations = iterations + (iterations == GLITCH_ITER).astype(np.int32) * self.compute_config.max_iterations
         brot_pixels = iterations == self.compute_config.max_iterations
-
         iterations = convert_to_fractional_counts(iterations, points).astype(np.int64)
-        # rescale to 0 so we can use the values as indices to the cumulative counts
-        iterations -= np.min(iterations)
 
-        histogram = np.histogram(iterations, np.max(iterations) + 1)[0]
-        # don't let brot pixels affect colour scaling
-        histogram[-1] -= np.sum(brot_pixels)
-        cumulative_counts = np.cumsum(histogram)
-        # rescale so the entire colour range is used (otherwise the first colour used would be offset)
-        cumulative_counts = cumulative_counts - cumulative_counts[0]
-        relative_cumulative_counts = cumulative_counts[iterations] / max(1, cumulative_counts[-1])
-
-        num_colours = self.palette.shape[0] - 1
-        indices = np.minimum(num_colours, (num_colours * relative_cumulative_counts).astype(np.int32))
-
-        colours = (255 * self.palette[indices]).astype(np.uint8)
-        colours[brot_pixels] = BROT_COLOUR
-
+        colours = histogram_colouring(iterations, self.palette, brot_pixels)
         self.set_image(Image.fromarray(colours, "RGB"))
 
     def save_image(self, image):
@@ -267,19 +248,6 @@ class FractalUI(tk.Frame):
             "PNG",
             optimize=True,
         )
-
-
-def convert_to_fractional_counts(iterations, points, scale=100):
-    abs_points = np.maximum(2, np.abs(points))
-    return scale * (iterations + np.log2(0.5*np.log2(BREAKOUT_R2)) - np.log2(np.log2(abs_points)))
-
-
-def generate_palette(rgb_offsets=None):
-    if rgb_offsets is None:
-        rgb_offsets = np.random.random(size=3)
-    cols = np.linspace(0, 1, 2**11)
-    a = np.column_stack([(cols + offset) * 1.5 * np.pi for offset in rgb_offsets])
-    return 0.5 + 0.5 * np.cos(a)
 
 
 def run(config: MandelbrotConfig, save: bool):
