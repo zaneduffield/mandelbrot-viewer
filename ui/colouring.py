@@ -4,9 +4,10 @@ import numpy as np
 BROT_COLOUR = (0, 0, 0)
 
 
-def histogram_colouring(iterations, palette, brot_pixels, num_cycles=2):
+def histogram_colouring(iterations, palette, brot_pixels, num_cycles=2, scale=100):
     # rescale to 0 so we can use the values as indices to the cumulative counts
     iterations -= np.min(iterations)
+    iterations = (scale * iterations).astype(np.int64)
 
     histogram = np.histogram(iterations, np.max(iterations) + 1)[0]
     # don't let brot pixels affect colour scaling

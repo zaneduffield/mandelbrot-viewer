@@ -102,7 +102,7 @@ class Mandelbrot:
         yield output
 
 
-def convert_to_fractional_counts(iterations, points, scale=100):
-    abs_points = np.maximum(2, np.abs(points))
-    return scale * (iterations + np.log2(0.5*np.log2(BREAKOUT_R2)) - np.log2(np.log2(abs_points)))
+def convert_to_fractional_counts(iterations, points):
+    abs_points = np.fmax(2, np.abs(points))
+    return iterations + np.log2(0.5*np.log2(BREAKOUT_R2)) - np.log2(np.log2(abs_points))
 

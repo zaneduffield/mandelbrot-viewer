@@ -31,6 +31,8 @@ class MandelbrotConfig:
         self._compute_corners()
 
     def set_zoom(self, zoom: mpfr):
+        if zoom <= 0:
+            raise ValueError("zoom must be positive")
         self._zoom = zoom
         self.set_precision()
         self._compute_corners()

@@ -11,7 +11,7 @@ def make_cli_args(config: MandelbrotConfig):
     zoom = 2 / (config.b_right().real - config.t_left().real)
     args = (
         f'--center "{str(center.real)} {str(center.imag)}" -z {zoom:.4e}'
-        f' -i {config.max_iterations} --height {config.image_height} --width {config.image_width}'
+        f" -i {config.max_iterations} --height {config.image_height} --width {config.image_width}"
     )
 
     if config.perturbation:
@@ -70,8 +70,15 @@ def main():
     parser.add_argument(
         "-g", "--gpu", action="store_true", help="Use GPU via OpenCL to render"
     )
-    parser.add_argument("-gd", "--gpu-double", action="store_true", help="Use double precision in OpenCL")
-    parser.add_argument("-log", "--log-level", choices=["debug", "info", "warning"], default="debug")
+    parser.add_argument(
+        "-gd",
+        "--gpu-double",
+        action="store_true",
+        help="Use double precision in OpenCL",
+    )
+    parser.add_argument(
+        "-log", "--log-level", choices=["debug", "info", "warning"], default="debug"
+    )
 
     args = parser.parse_args()
 
@@ -85,11 +92,11 @@ def main():
         max_iterations=args.iterations,
         perturbation=args.perturbation,
         gpu=args.gpu,
-        gpu_double_precision=args.gpu_double
+        gpu_double_precision=args.gpu_double,
     )
-    config.set_center_and_zoom(center = mpc(args.center), zoom = mpfr(args.zoom))
+    config.set_center_and_zoom(center=mpc(args.center), zoom=mpfr(args.zoom))
 
-    tkinter_ui.run(config, args.save)
+    tkinter_ui.run(config)
 
 
 if __name__ == "__main__":
