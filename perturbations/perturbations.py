@@ -131,19 +131,23 @@ class PerturbationComputer:
         num_series_terms,
     ):
         config.set_precision()
+        t_left = config.t_left()
+        b_right = config.b_right()
+        width = config.image_width
+        height = config.image_height
 
-        width_per_pixel = (config.b_right().real - config.t_left().real) / config.image_width
-        height_per_pixel = (-config.b_right().imag + config.t_left().imag) / config.image_height
-        ref_coords = config.image_width // 2, config.image_height // 2
+        width_per_pixel = (b_right.real - t_left.real) / width
+        height_per_pixel = (-b_right.imag + t_left.imag) / height
+        ref_coords = width // 2, height // 2
 
         def _ref_from_coords(coords: tuple):
-            return config.t_left() + coords[0] * width_per_pixel - coords[1] * height_per_pixel * 1j
+            return t_left + coords[0] * width_per_pixel - coords[1] * height_per_pixel * 1j
 
         if config.gpu and self.cl is None:
             self.cl = PerturbationCL()
 
-        iterations_grid = np.zeros((config.image_height, config.image_width), dtype=np.int32)
-        points = np.zeros((config.image_height, config.image_width), dtype=np.complex128)
+        iterations_grid = np.zeros((height, width), dtype=np.int32)
+        points = np.zeros((height, width), dtype=np.complex128)
         loops = 0
         while loops <= MAX_GLITCH_FIX_LOOPS:
             ref = _ref_from_coords(ref_coords)
@@ -154,8 +158,8 @@ class PerturbationComputer:
             my_logger.debug("computing series constants...")
             start = time.time()
             terms, iter_accurate, scaling_factor = compute_series_constants(
-                config.t_left(),
-                config.b_right(),
+                t_left,
+                b_right,
                 ref,
                 ref_hist,
                 ref_escaped_at,
@@ -171,8 +175,8 @@ class PerturbationComputer:
             pertubation_state = PertubationState(
                 float(width_per_pixel),
                 float(height_per_pixel),
-                config.image_width,
-                config.image_height,
+                width,
+                height,
                 np.array(ref_coords, dtype=np.int32),
                 terms,
                 num_series_terms,
@@ -194,9 +198,9 @@ class PerturbationComputer:
             if glitched_count <= MAX_OK_GLITCH_COUNT:
                 break
 
-            ref_coords = get_new_ref(iterations_grid, config.image_width, config.image_height, GLITCH_ITER)
+            ref_coords = get_new_ref(iterations_grid, width, height, GLITCH_ITER)
             if ref_coords is None:
-                ref_coords = random.randint(0, config.image_width), random.randint(0, config.image_height)
+                ref_coords = random.randint(0, width), random.randint(0, height)
             my_logger.debug(f"new ref at :{ref_coords}")
             loops += 1
 
