@@ -12,7 +12,13 @@ from utils.mandelbrot_utils import MandelbrotConfig
 
 
 def mandelbrot(config: MandelbrotConfig):
-    return _mandelbrot(complex(config.t_left()), complex(config.b_right()), config.image_height, config.image_width, config.max_iterations)
+    return _mandelbrot(
+        complex(config.t_left()),
+        complex(config.b_right()),
+        config.image_height,
+        config.image_width,
+        config.max_iterations,
+    )
 
 
 @njit(fastmath=True, parallel=True, nogil=True)
@@ -47,8 +53,8 @@ def _mandelbrot(t_left, b_right, height, width, max_iter):
 class Node:
     config: MandelbrotConfig
     output: Tuple
-    parent: 'Node'
-    children: List['Node'] = field(default_factory=list)
+    parent: "Node"
+    children: List["Node"] = field(default_factory=list)
 
 
 class Mandelbrot:
@@ -104,5 +110,6 @@ class Mandelbrot:
 
 def convert_to_fractional_counts(iterations, points):
     abs_points = np.fmax(2, np.abs(points))
-    return iterations + np.log2(0.5*np.log2(BREAKOUT_R2)) - np.log2(np.log2(abs_points))
-
+    return (
+        iterations + np.log2(0.5 * np.log2(BREAKOUT_R2)) - np.log2(np.log2(abs_points))
+    )

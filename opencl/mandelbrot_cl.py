@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+
 # import os
 # os.environ["PYOPENCL_COMPILER_OUTPUT"] = "1"
 from gmpy2 import mpc
@@ -13,6 +14,7 @@ PY_OPEN_CL_INSTALLED = False
 cl = None
 try:
     import pyopencl as cl
+
     PY_OPEN_CL_INSTALLED = True
 except ModuleNotFoundError:
     my_logger.warn("No PyOpenCL installation found.")
@@ -70,8 +72,12 @@ class MandelbrotCL:
         if self.shape != (height, width):
             self.shape = (height, width)
             self.iterations_grid = np.zeros(self.shape, dtype=np.int32, order="C")
-            self.ibuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.iterations_grid.nbytes)
-            self.points_grid = np.zeros(self.shape, dtype=self._get_complex_dtype(), order="C")
+            self.ibuf = cl.Buffer(
+                self.ctx, self.mf.WRITE_ONLY, self.iterations_grid.nbytes
+            )
+            self.points_grid = np.zeros(
+                self.shape, dtype=self._get_complex_dtype(), order="C"
+            )
             self.pbuf = cl.Buffer(self.ctx, self.mf.WRITE_ONLY, self.points_grid.nbytes)
 
     def manage_buffer(self, height, width):
@@ -100,7 +106,7 @@ class MandelbrotCL:
 
 class ClassicMandelbrotCL(MandelbrotCL):
     def get_program_contents(self):
-        with open(Path(__file__).parent / 'mandelbrot.cl') as f:
+        with open(Path(__file__).parent / "mandelbrot.cl") as f:
             return f.read()
 
     def _compute(self, t_left: mpc, b_right: mpc, width, height, iterations):
@@ -120,11 +126,17 @@ class ClassicMandelbrotCL(MandelbrotCL):
             np.int32(iterations),
             complex_dtype(0),
             np.int32(self.shape[1]),
-            np.int32(BREAKOUT_R2)
+            np.int32(BREAKOUT_R2),
         )
 
     def compute(self, config: MandelbrotConfig):
         self.set_precision(config.gpu_double_precision)
         with self.manage_buffer(config.image_height, config.image_width):
-            self._compute(config.t_left(), config.b_right(), config.image_width, config.image_height, config.max_iterations)
+            self._compute(
+                config.t_left(),
+                config.b_right(),
+                config.image_width,
+                config.image_height,
+                config.max_iterations,
+            )
         return self.out
