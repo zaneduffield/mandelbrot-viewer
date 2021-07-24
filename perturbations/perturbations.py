@@ -1,12 +1,12 @@
 import math
-import random
 import time
 from pathlib import Path
 
 import numpy as np
-from gmpy2 import mpc
+from gmpy2 import mpc, mpfr
 from numba import njit, prange, float64, complex128, int32, jit
 from numba.experimental import jitclass
+from dataclasses import dataclass
 
 from opencl.mandelbrot_cl import MandelbrotCL, cl
 from utils.constants import (
@@ -16,7 +16,24 @@ from utils.constants import (
     BREAKOUT_R2,
     GLITCH_DIFF_THRESHOLD,
 )
-from utils.mandelbrot_utils import MandelbrotConfig, my_logger
+from utils.mandelbrot_utils import MandelbrotConfig, get_precision, my_logger
+
+
+@dataclass(eq=False)
+class Reference:
+    orbit: np.ndarray
+    series_constants: np.ndarray
+    accurate_iters: int
+    escaped_at: int
+    init: mpc
+    width: mpfr
+    scaling_factor: float
+    precision: int
+
+    def __hash__(self):
+        return hash(
+            (str(self.init), self.width, self.scaling_factor, self.accurate_iters)
+        )
 
 
 @jit(forceobj=True)
@@ -119,12 +136,67 @@ def compute_series_constants(
     accurate_iters = iterate_series_constants(
         ref_hist, ref_escaped_at, p_deltas_init, terms, num_terms, scaling_factor
     )
-    return terms, accurate_iters, scaling_factor
+    return Reference(
+        orbit=ref_hist,
+        series_constants=terms,
+        accurate_iters=accurate_iters,
+        init=ref_init,
+        escaped_at=ref_escaped_at,
+        width=(b_right.real - t_left.real),
+        scaling_factor=scaling_factor,
+        precision=get_precision(),
+    )
 
 
 class PerturbationComputer:
     def __init__(self):
-        self.cl = None
+        self._cl = None
+
+    def _get_cl(self):
+        if self._cl is None:
+            self._cl = PerturbationCL()
+        return self._cl
+
+    def _get_or_set_zero_arr(self, name, dtype: type, shape):
+        if not hasattr(self, name) or self.__getattribute__(name).shape != shape:
+            self.__setattr__(name, np.empty(shape, dtype=dtype))
+        self.__getattribute__(name).fill(0)
+        return self.__getattribute__(name)
+
+    def _get_iterations_grid(self, config: MandelbrotConfig):
+        shape = (config.image_height, config.image_width)
+        return self._get_or_set_zero_arr("_iterations_grid", np.int32, shape)
+
+    def _get_points_grid(self, config: MandelbrotConfig):
+        shape = (config.image_height, config.image_width)
+        return self._get_or_set_zero_arr("_points_grid", np.complex128, shape)
+
+    def _get_ref(self, config: MandelbrotConfig, coords, num_series_terms, num_probes):
+        config.set_precision()
+        ref = config.get_point_by_coords(*coords)
+        start = time.time()
+        my_logger.debug("iterating reference")
+        ref_hist, ref_escaped_at = iterate_ref(ref, config.max_iterations)
+        my_logger.debug(f"iterating reference took {time.time() - start} seconds")
+        my_logger.debug("computing series constants...")
+        start = time.time()
+        reference = compute_series_constants(
+            config.t_left(),
+            config.b_right(),
+            ref,
+            ref_hist,
+            ref_escaped_at,
+            config.max_iterations,
+            num_series_terms,
+            num_probes,
+        )
+        my_logger.debug(f"series constants took {time.time() - start} seconds")
+
+        my_logger.debug(
+            f"proceeding with {reference.accurate_iters} reference iterations"
+        )
+        my_logger.debug(f"reference broke out at {ref_escaped_at}")
+        return reference
 
     def compute(
         self,
@@ -132,74 +204,31 @@ class PerturbationComputer:
         num_probes,
         num_series_terms,
     ):
-        config.set_precision()
-        t_left = config.t_left()
-        b_right = config.b_right()
-        width = config.image_width
-        height = config.image_height
-
-        width_per_pixel = (b_right.real - t_left.real) / width
-        height_per_pixel = (-b_right.imag + t_left.imag) / height
-        ref_coords = width // 2, height // 2
-
-        def _ref_from_coords(coords: tuple):
-            return (
-                t_left + coords[0] * width_per_pixel - coords[1] * height_per_pixel * 1j
-            )
-
-        if config.gpu and self.cl is None:
-            self.cl = PerturbationCL()
-
-        iterations_grid = np.zeros((height, width), dtype=np.int32)
-        points = np.zeros((height, width), dtype=np.complex128)
+        ref_coords = config.image_height // 2, config.image_width // 2
         loops = 0
         while loops <= MAX_GLITCH_FIX_LOOPS:
-            ref = _ref_from_coords(ref_coords)
-            start = time.time()
-            my_logger.debug("iterating reference")
-            ref_hist, ref_escaped_at = iterate_ref(ref, config.max_iterations)
-            my_logger.debug(f"iterating reference took {time.time() - start} seconds")
-            my_logger.debug("computing series constants...")
-            start = time.time()
-            terms, iter_accurate, scaling_factor = compute_series_constants(
-                t_left,
-                b_right,
-                ref,
-                ref_hist,
-                ref_escaped_at,
-                config.max_iterations,
-                num_series_terms,
-                num_probes,
+            reference = self._get_ref(config, ref_coords, num_series_terms, num_probes)
+            pertubation_state = get_perturbation_state(
+                config, np.array(ref_coords, dtype=np.int32), reference
             )
-            my_logger.debug(f"series constants took {time.time() - start} seconds")
-
-            my_logger.debug(f"proceeding with {iter_accurate} reference iterations")
-            my_logger.debug(f"reference broke out at {ref_escaped_at}")
-
-            pertubation_state = PertubationState(
-                float(width_per_pixel),
-                float(height_per_pixel),
-                width,
-                height,
-                np.array(ref_coords, dtype=np.int32),
-                terms,
-                num_series_terms,
-                ref_escaped_at,
-                ref_hist,
-                iter_accurate,
-                config.max_iterations,
-                scaling_factor,
-            )
+            my_logger.debug(f"new ref iterated at: {pertubation_state.ref_coords}")
 
             if config.gpu:
-                iterations_grid, points = self.cl.compute(
+                iterations_grid, points = self._get_cl().compute(
                     pertubation_state,
                     fix_glitches=bool(loops),
                     double_precision=config.gpu_double_precision,
                 )
             else:
+                iterations_grid, points = (
+                    self._get_iterations_grid(config),
+                    self._get_points_grid(config),
+                )
                 approximate_pixels(
-                    iterations_grid, points, pertubation_state, fix_glitches=bool(loops)
+                    iterations_grid,
+                    points,
+                    pertubation_state,
+                    fix_glitches=bool(loops),
                 )
             yield iterations_grid, points
 
@@ -208,59 +237,122 @@ class PerturbationComputer:
             if glitched_count <= MAX_OK_GLITCH_COUNT:
                 break
 
-            ref_coords = get_new_ref(iterations_grid, width, height, GLITCH_ITER)
-            if ref_coords is None:
-                ref_coords = random.randint(0, width), random.randint(0, height)
+            ref_coords = get_new_ref(iterations_grid)
             my_logger.debug(f"new ref at :{ref_coords}")
             loops += 1
 
 
-@njit(parallel=True)
-def get_new_ref(iterations_grid, width, height, blob_iter):
-    lo = np.array([0, 0])
-    hi = np.array([width, height])
+def get_new_ref(iterations_grid: np.ndarray):
+    lo = np.array([0, 0], dtype=np.int64)
+    hi = np.array(iterations_grid.shape, dtype=np.int64)
+    start = time.time()
+    refs = _get_new_refs(iterations_grid == GLITCH_ITER, lo, hi)
+    my_logger.debug(f"found {len(refs)} new refs in {time.time() - start} seconds")
+    return max(refs)[1:]
 
-    blob_counts = np.array([0, 0])
-    while (
-        hi[0] > lo[0]
-        and hi[1] > lo[1]
-        and np.sum(blob_counts) / ((hi[0] - lo[0]) * (hi[1] - lo[1])) < 0.9
-    ):
-        blob_counts = np.array([0, 0])
+
+@njit()
+def _get_search_size(lo, hi):
+    return (hi[0] - lo[0]) * (hi[1] - lo[1])
+
+
+@njit(inline="always")
+def _add_new_ref(lo, hi, refs):
+    size = _get_search_size(lo, hi)
+    refs.append((size, (hi[0] + lo[0]) // 2, (hi[1] + lo[1]) // 2))
+
+
+@njit()
+def _add_new_search(lo, hi, searches, refs):
+    if len(refs) == 0 or _get_search_size(lo, hi) > max(refs)[0]:
+        searches.append((lo, hi))
+
+
+@njit(parallel=True)
+def _get_new_refs(
+    blob_grid: np.ndarray, lo: np.ndarray, hi: np.ndarray, max_sectors=20, max_refs=5
+):
+    searches = [(lo, hi)]
+    refs = []
+    while searches and len(refs) < max_refs:
+        (lo, hi) = searches.pop()
+        if hi[0] <= lo[0] or hi[1] <= lo[1]:
+            _add_new_ref(lo, hi, refs)
+            continue
 
         dim = int(hi[0] - lo[0] < hi[1] - lo[1])
-        mid = (hi[dim] + lo[dim]) // 2
-        for y in prange(lo[1], hi[1]):
-            for x in range(lo[0], hi[0]):
-                sector = int((x, y)[dim] > mid)
-                blob_counts[sector] += int(iterations_grid[y, x] == blob_iter)
+        num_sectors = min(hi[dim] - lo[dim], max_sectors)
+        blob_counts = np.zeros(num_sectors)
+        sector_width = (hi[dim] - lo[dim]) / num_sectors
+        sector = 0
+        for i in prange(lo[0], hi[0]):
+            if not dim:
+                sector = int((i - lo[0]) / sector_width)
+            for j in range(lo[1], hi[1]):
+                if dim:
+                    sector = int((j - lo[1]) / sector_width)
+                blob_counts[sector] += int(blob_grid[i, j])
 
-        if blob_counts[0] > blob_counts[1]:
-            hi[dim] = mid
-        else:
-            lo[dim] = mid + 1
+        total = np.sum(blob_counts)
+        if total == 0 or total / _get_search_size(lo, hi) >= 0.9:
+            _add_new_ref(lo, hi, refs)
+            continue
 
-    return (hi[0] + lo[0]) // 2, (hi[1] + lo[1]) // 2
+        selection = None
+        index = 0
+        while index <= num_sectors:
+            if index < num_sectors and blob_counts[index] / total > 1 / num_sectors:
+                if selection is None:
+                    selection = [index, index + 1]
+                else:
+                    selection[-1] = index + 1
+            elif selection is not None:
+                new_lo = lo.copy()
+                new_hi = hi.copy()
+                new_lo[dim] += selection[0] * sector_width
+                new_hi[dim] = lo[dim] + selection[1] * sector_width
+                _add_new_search(new_lo, new_hi, searches, refs)
+                selection = None
+
+            index += 1
+
+    return refs
 
 
-spec = [
-    ("w_per_pix", float64),
-    ("h_per_pix", float64),
-    ("width", int32),
-    ("height", int32),
-    ("ref_coords", int32[:]),
-    ("terms", complex128[:, :]),
-    ("num_terms", int32),
-    ("breakout", int32),
-    ("precise_reference", complex128[:]),
-    ("iter_accurate", int32),
-    ("max_iterations", int32),
-    ("scaling_factor", float64),
-]
+def get_perturbation_state(config: MandelbrotConfig, ref_coords, reference: Reference):
+    return PerturbationState(
+        config.get_width_per_pix(),
+        config.get_height_per_pix(),
+        config.image_width,
+        config.image_height,
+        ref_coords,
+        reference.series_constants,
+        reference.series_constants.shape[0],
+        reference.escaped_at,
+        reference.orbit,
+        reference.accurate_iters,
+        config.max_iterations,
+        reference.scaling_factor,
+    )
 
 
-@jitclass(spec)
-class PertubationState:
+@jitclass(
+    [
+        ("w_per_pix", float64),
+        ("h_per_pix", float64),
+        ("width", int32),
+        ("height", int32),
+        ("ref_coords", int32[:]),
+        ("terms", complex128[:, :]),
+        ("num_terms", int32),
+        ("breakout", int32),
+        ("precise_reference", complex128[:]),
+        ("iter_accurate", int32),
+        ("max_iterations", int32),
+        ("scaling_factor", float64),
+    ]
+)
+class PerturbationState:
     def __init__(
         self,
         w_per_pix,
@@ -294,7 +386,7 @@ class PerturbationCL(MandelbrotCL):
         with open(Path(__file__).parent / "mandelbrot_perturbations.cl") as f:
             return f.read()
 
-    def _compute(self, pert: PertubationState, fix_glitches):
+    def _compute(self, pert: PerturbationState, fix_glitches):
         my_logger.debug("computing")
         real_dtype = self._get_real_dtype()
         complex_dtype = self._get_complex_dtype()
@@ -319,8 +411,8 @@ class PerturbationCL(MandelbrotCL):
             real_dtype(pert.w_per_pix),
             real_dtype(pert.h_per_pix),
             np.int32(pert.width),
-            np.int32(pert.ref_coords[0]),
             np.int32(pert.ref_coords[1]),
+            np.int32(pert.ref_coords[0]),
             terms_buf,
             np.int32(pert.num_terms),
             real_dtype(pert.scaling_factor),
@@ -335,7 +427,7 @@ class PerturbationCL(MandelbrotCL):
         )
 
     def compute(
-        self, pert: PertubationState, fix_glitches: bool, double_precision: bool
+        self, pert: PerturbationState, fix_glitches: bool, double_precision: bool
     ):
         self.set_precision(double_precision)
         with self.manage_buffer(pert.height, pert.width):
@@ -344,17 +436,18 @@ class PerturbationCL(MandelbrotCL):
 
 
 @njit
-def get_init_delta(data, i, j):
-    hor_delta = (i - data.ref_coords[0]) * data.w_per_pix
-    ver_delta = (data.ref_coords[1] - j) * data.h_per_pix
+def get_init_delta(data: PerturbationState, i, j):
+    hor_delta = (i - data.ref_coords[1]) * data.w_per_pix
+    ver_delta = (data.ref_coords[0] - j) * data.h_per_pix
     return complex(hor_delta, ver_delta)
 
 
 @njit
-def get_delta_estimate(data, init_delta, iteration):
+def get_delta_estimate(data: PerturbationState, init_delta, iteration):
     scaled_delta = init_delta * data.scaling_factor
     out = 0
     for k in range(data.num_terms):
+        # TODO this is the wrong order to iterate through the terms array
         term = data.terms[k][iteration - 1]
         out += term * scaled_delta
         scaled_delta *= init_delta * data.scaling_factor
@@ -362,7 +455,7 @@ def get_delta_estimate(data, init_delta, iteration):
 
 
 @njit
-def get_reference(data, iteration):
+def get_reference(data: PerturbationState, iteration):
     return data.precise_reference[iteration - 1]
 
 
@@ -372,7 +465,7 @@ def sq_mod(point):
 
 
 @njit
-def approximate_pixel(data, x, y, iterations_grid, points):
+def approximate_pixel(data: PerturbationState, x, y, iterations_grid, points):
     delta_0 = get_init_delta(data, x, y)
     delta_i = get_delta_estimate(data, delta_0, data.iter_accurate)
     point = 0
@@ -416,7 +509,7 @@ def approximate_pixel(data, x, y, iterations_grid, points):
 def approximate_pixels(
     iterations_grid: np.ndarray,
     points: np.ndarray,
-    state: PertubationState,
+    state: PerturbationState,
     fix_glitches: bool,
 ):
     for y in prange(state.height):

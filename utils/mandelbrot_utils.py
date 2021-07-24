@@ -41,8 +41,13 @@ class MandelbrotConfig:
         self._center = center
         self._compute_corners()
 
-    def set_precision(self):
-        set_precision(self.get_width() / max(1000, self.image_width))
+    def get_required_precision(self):
+        return required_precision_for_pix_width(
+            self.get_width() / max(1000, self.image_width)
+        )
+
+    def set_precision(self, extra_precision_factor=1):
+        set_precision(self.get_required_precision() * extra_precision_factor)
 
     def get_center(self):
         return self._center
@@ -55,6 +60,25 @@ class MandelbrotConfig:
 
     def get_width(self):
         return self._convert_between_zoom_width(self.get_zoom())
+
+    def get_width_per_pix(self):
+        return float((self.b_right().real - self.t_left().real) / self.image_width)
+
+    def get_height_per_pix(self):
+        return float((-self.b_right().imag + self.t_left().imag) / self.image_height)
+
+    def get_point_by_coords(self, imag: int, real: int):
+        return (
+            self.t_left()
+            + real * self.get_width_per_pix()
+            - imag * self.get_height_per_pix() * 1j
+        )
+
+    def get_coords_for_point(self, point: mpc):
+        return (
+            (point.real - self.t_left().real) / self.get_width_per_pix(),
+            (-point.imag + self.t_left().imag) / self.get_height_per_pix(),
+        )
 
     def set_zoom_from_width(self, width: mpfr):
         self.set_zoom(self._convert_between_zoom_width(width))
@@ -77,5 +101,13 @@ class MandelbrotConfig:
         return self._b_right
 
 
-def set_precision(width_per_pixel: mpfr):
-    get_context().precision = max(10, int(-log2(width_per_pixel) * 2))
+def required_precision_for_pix_width(width_per_pixel):
+    return max(10, int(-log2(width_per_pixel) * 2))
+
+
+def set_precision(precision: int):
+    get_context().precision = precision
+
+
+def get_precision():
+    return get_context().precision
