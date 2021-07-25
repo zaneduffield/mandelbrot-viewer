@@ -76,9 +76,13 @@ class MandelbrotConfig:
 
     def get_coords_for_point(self, point: mpc):
         return (
-            (point.real - self.t_left().real) / self.get_width_per_pix(),
             (-point.imag + self.t_left().imag) / self.get_height_per_pix(),
+            (point.real - self.t_left().real) / self.get_width_per_pix(),
         )
+    
+    def is_point_in_frame(self, point: mpc):
+        coords = self.get_coords_for_point(point)
+        return (0, 0) <= coords <= (self.image_height, self.image_width)
 
     def set_zoom_from_width(self, width: mpfr):
         self.set_zoom(self._convert_between_zoom_width(width))

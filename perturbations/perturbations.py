@@ -9,6 +9,8 @@ from numba.experimental import jitclass
 from dataclasses import dataclass
 
 from opencl.mandelbrot_cl import MandelbrotCL, cl
+from perturbations.reference_utils.selection.blob_search import get_new_ref
+from perturbations.reference_utils.selection.newton_iteration import locate_zero
 from utils.constants import (
     GLITCH_ITER,
     MAX_GLITCH_FIX_LOOPS,
@@ -172,7 +174,6 @@ class PerturbationComputer:
         return self._get_or_set_zero_arr("_points_grid", np.complex128, shape)
 
     def _get_ref(self, config: MandelbrotConfig, coords, num_series_terms, num_probes):
-        config.set_precision()
         ref = config.get_point_by_coords(*coords)
         start = time.time()
         my_logger.debug("iterating reference")
@@ -204,7 +205,16 @@ class PerturbationComputer:
         num_probes,
         num_series_terms,
     ):
-        ref_coords = config.image_height // 2, config.image_width // 2
+        config.set_precision()
+        ref_coords = config.get_coords_for_point(config.get_center())
+
+        start = time.time()
+        approx_zero = locate_zero(config)
+        my_logger.debug(f"spent {time.time() - start:4f} seconds looking for an approx zero")
+        if approx_zero is not None and config.is_point_in_frame(approx_zero):
+            my_logger.debug("approx zero found within frame!")
+            ref_coords = config.get_coords_for_point(approx_zero)
+
         loops = 0
         while loops <= MAX_GLITCH_FIX_LOOPS:
             reference = self._get_ref(config, ref_coords, num_series_terms, num_probes)
@@ -237,86 +247,10 @@ class PerturbationComputer:
             if glitched_count <= MAX_OK_GLITCH_COUNT:
                 break
 
-            ref_coords = get_new_ref(iterations_grid)
+            ref_coords = get_new_ref(iterations_grid == GLITCH_ITER)
             my_logger.debug(f"new ref at :{ref_coords}")
             loops += 1
 
-
-def get_new_ref(iterations_grid: np.ndarray):
-    lo = np.array([0, 0], dtype=np.int64)
-    hi = np.array(iterations_grid.shape, dtype=np.int64)
-    start = time.time()
-    refs = _get_new_refs(iterations_grid == GLITCH_ITER, lo, hi)
-    my_logger.debug(f"found {len(refs)} new refs in {time.time() - start} seconds")
-    return max(refs)[1:]
-
-
-@njit()
-def _get_search_size(lo, hi):
-    return (hi[0] - lo[0]) * (hi[1] - lo[1])
-
-
-@njit(inline="always")
-def _add_new_ref(lo, hi, refs):
-    size = _get_search_size(lo, hi)
-    refs.append((size, (hi[0] + lo[0]) // 2, (hi[1] + lo[1]) // 2))
-
-
-@njit()
-def _add_new_search(lo, hi, searches, refs):
-    if len(refs) == 0 or _get_search_size(lo, hi) > max(refs)[0]:
-        searches.append((lo, hi))
-
-
-@njit(parallel=True)
-def _get_new_refs(
-    blob_grid: np.ndarray, lo: np.ndarray, hi: np.ndarray, max_sectors=20, max_refs=5
-):
-    searches = [(lo, hi)]
-    refs = []
-    while searches and len(refs) < max_refs:
-        (lo, hi) = searches.pop()
-        if hi[0] <= lo[0] or hi[1] <= lo[1]:
-            _add_new_ref(lo, hi, refs)
-            continue
-
-        dim = int(hi[0] - lo[0] < hi[1] - lo[1])
-        num_sectors = min(hi[dim] - lo[dim], max_sectors)
-        blob_counts = np.zeros(num_sectors)
-        sector_width = (hi[dim] - lo[dim]) / num_sectors
-        sector = 0
-        for i in prange(lo[0], hi[0]):
-            if not dim:
-                sector = int((i - lo[0]) / sector_width)
-            for j in range(lo[1], hi[1]):
-                if dim:
-                    sector = int((j - lo[1]) / sector_width)
-                blob_counts[sector] += int(blob_grid[i, j])
-
-        total = np.sum(blob_counts)
-        if total == 0 or total / _get_search_size(lo, hi) >= 0.9:
-            _add_new_ref(lo, hi, refs)
-            continue
-
-        selection = None
-        index = 0
-        while index <= num_sectors:
-            if index < num_sectors and blob_counts[index] / total > 1 / num_sectors:
-                if selection is None:
-                    selection = [index, index + 1]
-                else:
-                    selection[-1] = index + 1
-            elif selection is not None:
-                new_lo = lo.copy()
-                new_hi = hi.copy()
-                new_lo[dim] += selection[0] * sector_width
-                new_hi[dim] = lo[dim] + selection[1] * sector_width
-                _add_new_search(new_lo, new_hi, searches, refs)
-                selection = None
-
-            index += 1
-
-    return refs
 
 
 def get_perturbation_state(config: MandelbrotConfig, ref_coords, reference: Reference):
