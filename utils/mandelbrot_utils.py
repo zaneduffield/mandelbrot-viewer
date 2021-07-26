@@ -79,7 +79,7 @@ class MandelbrotConfig:
             (-point.imag + self.t_left().imag) / self.get_height_per_pix(),
             (point.real - self.t_left().real) / self.get_width_per_pix(),
         )
-    
+
     def is_point_in_frame(self, point: mpc):
         coords = self.get_coords_for_point(point)
         return (0, 0) <= coords <= (self.image_height, self.image_width)

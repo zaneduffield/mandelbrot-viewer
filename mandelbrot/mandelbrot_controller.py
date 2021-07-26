@@ -6,8 +6,8 @@ import numpy as np
 from numba import njit, prange
 
 from opencl.mandelbrot_cl import MandelbrotCL, ClassicMandelbrotCL
-from perturbations.perturbations import PerturbationComputer
-from utils.constants import BREAKOUT_R2, NUM_PROBES, NUM_SERIES_TERMS
+from perturbations.perturbation import PerturbationController
+from utils.constants import BREAKOUT_R2
 from utils.mandelbrot_utils import MandelbrotConfig
 
 
@@ -57,10 +57,10 @@ class Node:
     children: List["Node"] = field(default_factory=list)
 
 
-class Mandelbrot:
+class MandelbrotController:
     def __init__(self):
         self.history: Node = None
-        self._perturbations_computer: PerturbationComputer = None
+        self._perturbations_controller: PerturbationController = None
         self._cl: MandelbrotCL = None
 
     def get_cl(self):
@@ -69,9 +69,9 @@ class Mandelbrot:
         return self._cl
 
     def get_pert(self):
-        if self._perturbations_computer is None:
-            self._perturbations_computer = PerturbationComputer()
-        return self._perturbations_computer
+        if self._perturbations_controller is None:
+            self._perturbations_controller = PerturbationController()
+        return self._perturbations_controller
 
     def push(self, config: MandelbrotConfig, output):
         node = Node(config, output, self.history)
@@ -95,7 +95,7 @@ class Mandelbrot:
     def compute(self, config: MandelbrotConfig):
         output = (None, None)
         if config.perturbation:
-            for output in self.get_pert().compute(config, NUM_PROBES, NUM_SERIES_TERMS):
+            for output in self.get_pert().compute(config):
                 yield output
         elif config.gpu:
             output = self.get_cl().compute(config)

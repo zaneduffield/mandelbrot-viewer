@@ -10,7 +10,10 @@ from PIL import Image, ImageTk
 from gmpy2 import mpc, mpfr
 from tkinter.filedialog import asksaveasfile
 
-from mandelbrot.mandelbrot import Mandelbrot, convert_to_fractional_counts
+from mandelbrot.mandelbrot_controller import (
+    MandelbrotController,
+    convert_to_fractional_counts,
+)
 from mandelbrot_viewer import make_cli_args
 from opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
 from ui.colouring import histogram_colouring, generate_palette
@@ -59,7 +62,7 @@ class FractalUI(tk.Frame):
         self.parent = parent
         self.parent.title("Mandelbrot")
 
-        self.fractal = Mandelbrot()
+        self.fractal = MandelbrotController()
         self.compute_config = config
         self.palette = generate_palette()
         self.computing = False

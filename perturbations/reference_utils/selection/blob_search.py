@@ -1,8 +1,9 @@
-from utils.mandelbrot_utils import my_logger
+import time
+import numpy as np
+
 from numba import njit
 
-import numpy as np
-import time
+from utils.mandelbrot_utils import my_logger
 
 
 def get_new_ref(blob_grid: np.ndarray):
