@@ -16,7 +16,7 @@ from brot.mandelbrot.controller import (
 )
 from brot.cli import make_cli_args
 from brot.mandelbrot.opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
-from .colouring import cyclic_colouring, generate_palette
+from .colouring import cyclic_colouring, generate_palette, next_palette
 from brot.utils.constants import GLITCH_ITER
 from brot.utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
@@ -64,7 +64,7 @@ class FractalUI(tk.Frame):
 
         self.fractal = MandelbrotController()
         self.compute_config = config
-        self.palette = generate_palette()
+        self.palette = next_palette()
         self.computing = False
         self.compute_result = None
 
@@ -184,11 +184,15 @@ class FractalUI(tk.Frame):
 
         ###########################################################################################
 
-        tk.Button(image_controls, command=self.recolour, text="recolour").pack(
-            side=tk.LEFT
+        tk.Button(image_controls, command=self.next_colour, text="next colour").pack(
+            side=tk.TOP
         )
+        tk.Button(image_controls, command=self.random_colour, text="random colour").pack(
+            side=tk.TOP
+        )
+
         tk.Button(image_controls, command=self.save_image, text="save").pack(
-            side=tk.RIGHT
+            side=tk.TOP
         )
 
         ###########################################################################################
@@ -227,7 +231,11 @@ class FractalUI(tk.Frame):
         self.parent.clipboard_clear()
         self.parent.clipboard_append(make_cli_args(self.compute_config))
 
-    def recolour(self):
+    def next_colour(self):
+        self.palette = next_palette()
+        self.draw(self.compute_result)
+
+    def random_colour(self):
         self.palette = generate_palette()
         self.draw(self.compute_result)
 
