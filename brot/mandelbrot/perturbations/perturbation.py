@@ -2,21 +2,21 @@ import time
 
 import numpy as np
 
-from perturbations.perturbation_utils.opencl.mandelbrot_perturbation_cl import (
+from .perturbation_utils.opencl.mandelbrot_perturbation_cl import (
     PerturbationCL,
 )
-from perturbations.perturbation_utils.perturbation_state import make_perturbation_state
-from perturbations.perturbation_utils.perturbed_iteration import iterate_perturbation
-from perturbations.reference_utils.reference import Reference, iterate_ref
-from perturbations.reference_utils.selection.blob_search import get_new_ref
-from perturbations.reference_utils.selection.newton_iteration import locate_zero
-from perturbations.reference_utils.series_approximation import compute_series_terms
-from utils.constants import (
+from .perturbation_utils.perturbation_state import make_perturbation_state
+from .perturbation_utils.perturbed_iteration import iterate_perturbation
+from .reference_utils.reference import Reference, iterate_ref
+from .reference_utils.selection.blob_search import get_new_ref
+from .reference_utils.selection.newton_iteration import locate_zero
+from .reference_utils.series_approximation import compute_series_terms
+from brot.utils.constants import (
     GLITCH_ITER,
     MAX_GLITCH_FIX_LOOPS,
     MAX_OK_GLITCH_COUNT,
 )
-from utils.mandelbrot_utils import MandelbrotConfig, get_precision, my_logger
+from brot.utils.mandelbrot_utils import MandelbrotConfig, get_precision, my_logger
 
 
 class PerturbationController:

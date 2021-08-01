@@ -2,8 +2,8 @@ import time
 
 from gmpy2 import mpc
 
-from utils.constants import BREAKOUT_R2
-from utils.mandelbrot_utils import MandelbrotConfig, my_logger
+from brot.utils.constants import BREAKOUT_R2
+from brot.utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 
 def locate_zero(config: MandelbrotConfig):
@@ -69,9 +69,9 @@ def find_period(config: MandelbrotConfig):
     """
     The idea is to iterate a polygon containing region in which we would like to find a periodic point.
     A periodic point of period n is a root of the mandelbrot iteration of degree n.
-    We iterate the polygon until it encloses the origin. When this happens, it's very likely that there 
-    exists a point from the interior of the original polygon that is a root at this iteration number. 
-    This is because the iterated mandelbrot iteration formula is continuous and the original polygon is 
+    We iterate the polygon until it encloses the origin. When this happens, it's very likely that there
+    exists a point from the interior of the original polygon that is a root at this iteration number.
+    This is because the iterated mandelbrot iteration formula is continuous and the original polygon is
     very small.
     Return this number as the target period.
     """

@@ -1,4 +1,3 @@
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -7,8 +6,8 @@ import numpy as np
 # os.environ["PYOPENCL_COMPILER_OUTPUT"] = "1"
 from gmpy2 import mpc
 
-from utils.constants import BREAKOUT_R2
-from utils.mandelbrot_utils import MandelbrotConfig, my_logger
+from brot.utils.constants import BREAKOUT_R2
+from brot.utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 PY_OPEN_CL_INSTALLED = False
 cl = None

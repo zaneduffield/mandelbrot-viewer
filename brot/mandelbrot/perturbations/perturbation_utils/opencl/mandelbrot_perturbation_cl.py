@@ -2,14 +2,16 @@ from pathlib import Path
 
 import numpy as np
 
-from opencl.mandelbrot_cl import MandelbrotCL, cl
-from perturbations.perturbation_utils.perturbed_iteration import PerturbationState
-from utils.constants import (
+from brot.mandelbrot.opencl.mandelbrot_cl import MandelbrotCL, cl
+from brot.mandelbrot.perturbations.perturbation_utils.perturbed_iteration import (
+    PerturbationState,
+)
+from brot.utils.constants import (
     GLITCH_ITER,
     BREAKOUT_R2,
     GLITCH_DIFF_THRESHOLD,
 )
-from utils.mandelbrot_utils import my_logger
+from brot.utils.mandelbrot_utils import my_logger
 
 
 class PerturbationCL(MandelbrotCL):

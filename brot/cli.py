@@ -2,8 +2,7 @@ import argparse
 
 from gmpy2 import mpfr, mpc, get_context
 
-from ui import tkinter_ui
-from utils.mandelbrot_utils import MandelbrotConfig, my_logger
+from brot.utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 
 def make_cli_args(config: MandelbrotConfig):
@@ -26,7 +25,7 @@ def make_cli_args(config: MandelbrotConfig):
     return args
 
 
-def main():
+def make_config():
     parser = argparse.ArgumentParser(description="Generate the Mandelbrot set")
     parser.add_argument(
         "-i",
@@ -47,20 +46,10 @@ def main():
         "--zoom",
         type=str,
         help="zoom",
-        default="0.5E+0",
+        default="1E+0",
     )
     parser.add_argument("--height", type=int, default=0)
     parser.add_argument("--width", type=int, default=0)
-
-    parser.add_argument(
-        "-s", "--save", action="store_true", help="Save the generated image."
-    )
-    parser.add_argument(
-        "-nm",
-        "--no-multiprocessing",
-        action="store_false",
-        help="Don't use multiprocessing.",
-    )
     parser.add_argument(
         "-p",
         "--perturbation",
@@ -96,8 +85,4 @@ def main():
     )
     config.set_center_and_zoom(center=mpc(args.center), zoom=mpfr(args.zoom))
 
-    tkinter_ui.run(config)
-
-
-if __name__ == "__main__":
-    main()
+    return config

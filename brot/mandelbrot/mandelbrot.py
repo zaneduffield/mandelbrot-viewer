@@ -1,8 +1,8 @@
 import numpy as np
 from numba import njit, prange
 
-from utils.constants import BREAKOUT_R2
-from utils.mandelbrot_utils import MandelbrotConfig
+from brot.utils.constants import BREAKOUT_R2
+from brot.utils.mandelbrot_utils import MandelbrotConfig
 
 
 def mandelbrot(config: MandelbrotConfig):

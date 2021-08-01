@@ -1,8 +1,8 @@
 from numba import float64, complex128, int32
 from numba.experimental import jitclass
 
-from perturbations.reference_utils.reference import Reference
-from utils.mandelbrot_utils import MandelbrotConfig
+from ..reference_utils.reference import Reference
+from brot.utils.mandelbrot_utils import MandelbrotConfig
 
 
 def make_perturbation_state(config: MandelbrotConfig, ref_coords, reference: Reference):

@@ -1,8 +1,8 @@
 import numpy as np
 from numba import njit, prange
 
-from perturbations.perturbation_utils.perturbation_state import PerturbationState
-from utils.constants import (
+from .perturbation_state import PerturbationState
+from brot.utils.constants import (
     GLITCH_ITER,
     BREAKOUT_R2,
     GLITCH_DIFF_THRESHOLD,

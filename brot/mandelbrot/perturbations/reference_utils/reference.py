@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 from gmpy2 import mpc, mpfr
 
-from utils.constants import (
+from brot.utils.constants import (
     BREAKOUT_R2,
 )
 

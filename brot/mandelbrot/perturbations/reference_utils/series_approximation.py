@@ -4,8 +4,8 @@ import numpy as np
 from gmpy2 import mpc
 from numba import njit
 
-from perturbations.reference_utils.reference import Reference
-from utils.mandelbrot_utils import MandelbrotConfig
+from .reference import Reference
+from brot.utils.mandelbrot_utils import MandelbrotConfig
 
 
 @njit

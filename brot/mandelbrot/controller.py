@@ -4,10 +4,10 @@ from typing import List, Tuple
 
 import numpy as np
 
-from opencl.mandelbrot_cl import MandelbrotCL, ClassicMandelbrotCL
-from perturbations.perturbation import PerturbationController
-from utils.constants import BREAKOUT_R2
-from utils.mandelbrot_utils import MandelbrotConfig
+from .opencl.mandelbrot_cl import MandelbrotCL, ClassicMandelbrotCL
+from .perturbations.perturbation import PerturbationController
+from brot.utils.constants import BREAKOUT_R2
+from brot.utils.mandelbrot_utils import MandelbrotConfig
 from .mandelbrot import mandelbrot
 
 

@@ -3,7 +3,7 @@ import numpy as np
 
 from numba import njit
 
-from utils.mandelbrot_utils import my_logger
+from brot.utils.mandelbrot_utils import my_logger
 
 
 def get_new_ref(blob_grid: np.ndarray):

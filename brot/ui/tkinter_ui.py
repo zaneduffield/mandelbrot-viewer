@@ -10,15 +10,15 @@ from PIL import Image, ImageTk
 from gmpy2 import mpc, mpfr
 from tkinter.filedialog import asksaveasfile
 
-from mandelbrot.controller import (
+from brot.mandelbrot.controller import (
     MandelbrotController,
     convert_to_fractional_counts,
 )
-from mandelbrot_viewer import make_cli_args
-from opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
-from ui.colouring import cyclic_colouring, generate_palette
-from utils.constants import BREAKOUT_R2, GLITCH_ITER
-from utils.mandelbrot_utils import MandelbrotConfig, my_logger
+from brot.cli import make_cli_args
+from brot.mandelbrot.opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
+from .colouring import cyclic_colouring, generate_palette
+from brot.utils.constants import GLITCH_ITER
+from brot.utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
 MIN_WINDOW_WIDTH = 400
 MIN_WIDOW_HEIGHT = 300
@@ -438,7 +438,9 @@ class FractalUI(tk.Frame):
 
 def run(config: MandelbrotConfig):
     root = tk.Tk()
-    root.iconbitmap(Path(__file__).parent / "brot.ico")
+    icon = Path(__file__).parent / "brot.ico"
+    if icon.exists():
+        root.iconbitmap(icon)
 
     if 0 in [config.image_height, config.image_width]:
         screen_size_prop = 0.4
