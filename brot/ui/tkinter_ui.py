@@ -76,16 +76,18 @@ class FractalUI(tk.Frame):
         compute_controls = tk.Frame(self.control_panel)
         gpu_controls = tk.LabelFrame(self.control_panel)
         perturbation_controls = tk.LabelFrame(self.control_panel)
-        image_controls = tk.LabelFrame(self.control_panel)
-        resolution_controls = tk.LabelFrame(self.control_panel, text="resolution scale")
-        navigation_controls = tk.LabelFrame(self.control_panel)
+        image_controls = tk.LabelFrame(self.control_panel, text="Image")
+        colour_controls = tk.LabelFrame(self.control_panel, text="Colouring")
+        resolution_controls = tk.LabelFrame(self.control_panel, text="Resolution Scale")
+        navigation_controls = tk.LabelFrame(self.control_panel, text="Navigation")
 
-        panel_padding = 7
+        panel_padding = 3
         compute_controls.pack(side=tk.TOP, fill=tk.X, pady=panel_padding)
         gpu_controls.pack(side=tk.TOP, fill=tk.X, pady=panel_padding)
         perturbation_controls.pack(side=tk.TOP, fill=tk.X, pady=panel_padding)
         navigation_controls.pack(side=tk.BOTTOM, fill=tk.X, pady=panel_padding)
         resolution_controls.pack(side=tk.BOTTOM, fill=tk.X, pady=panel_padding)
+        colour_controls.pack(side=tk.BOTTOM, fill=tk.X, pady=panel_padding)
         image_controls.pack(side=tk.BOTTOM, fill=tk.X, pady=panel_padding)
 
         ###########################################################################################
@@ -98,18 +100,18 @@ class FractalUI(tk.Frame):
         center_im = tk.Frame(center_frame)
         tk.Label(center_re, text="Re:").pack(side=tk.LEFT)
         tk.Label(center_im, text="Im:").pack(side=tk.LEFT)
-        tk.Entry(center_re, textvariable=self.center_re, state="readonly").pack(
-            side=tk.LEFT, fill=tk.X
+        tk.Entry(center_re, textvariable=self.center_re, state="readonly", width=13).pack(
+            side=tk.LEFT
         )
-        tk.Entry(center_im, textvariable=self.center_im, state="readonly").pack(
-            side=tk.LEFT, fill=tk.X
+        tk.Entry(center_im, textvariable=self.center_im, state="readonly", width=13).pack(
+            side=tk.LEFT
         )
         center_re.pack(side=tk.TOP, fill=tk.X)
         center_im.pack(side=tk.TOP, fill=tk.X)
 
         self.zoom_frame = tk.LabelFrame(compute_controls, text="Zoom")
         self.zoom = tk.StringVar()
-        zoom_entry = tk.Entry(self.zoom_frame, textvariable=self.zoom)
+        zoom_entry = tk.Entry(self.zoom_frame, textvariable=self.zoom, width=11)
         self.write_zoom_entry(config.get_zoom())
         tk.Button(self.zoom_frame, text="+", command=self.increase_zoom).pack(
             side=tk.RIGHT
@@ -131,11 +133,11 @@ class FractalUI(tk.Frame):
         other = tk.Frame(compute_controls)
         tk.Button(other, command=self.recompute, text="recompute").pack(side=tk.LEFT)
         tk.Button(other, command=self.copy_cli, text="copy CLI").pack(side=tk.RIGHT)
-        other.pack(side=tk.TOP, pady=5)
+        other.pack(side=tk.TOP, pady=panel_padding)
 
-        center_frame.pack(side=tk.TOP, fill=tk.X)
-        self.zoom_frame.pack(side=tk.TOP, fill=tk.X)
-        iterations_frame.pack(side=tk.TOP, fill=tk.X)
+        center_frame.pack(side=tk.TOP, fill=tk.X, pady=panel_padding)
+        self.zoom_frame.pack(side=tk.TOP, fill=tk.X, pady=panel_padding)
+        iterations_frame.pack(side=tk.TOP, fill=tk.X, pady=panel_padding)
 
         ###########################################################################################
 
@@ -145,7 +147,7 @@ class FractalUI(tk.Frame):
 
         gpu_double_precision_checkbox = tk.Checkbutton(
             gpu_controls,
-            text="gpu double precision",
+            text="GPU double",
             variable=self.gpu_double_precision,
         )
         _set_double_precision_state = lambda: gpu_double_precision_checkbox.configure(
@@ -155,7 +157,7 @@ class FractalUI(tk.Frame):
 
         tk.Checkbutton(
             gpu_controls,
-            text="gpu",
+            text="GPU",
             variable=self.gpu,
             state=gpu_checkbox_state,
             command=_set_double_precision_state,
@@ -184,12 +186,16 @@ class FractalUI(tk.Frame):
 
         ###########################################################################################
 
-        tk.Button(image_controls, command=self.next_colour, text="next colour").pack(
-            side=tk.TOP
+        centered = tk.Frame(colour_controls)
+        tk.Button(centered, command=self.next_colour, text="next").pack(
+            side=tk.LEFT
         )
-        tk.Button(image_controls, command=self.random_colour, text="random colour").pack(
-            side=tk.TOP
+        tk.Button(centered, command=self.random_colour, text="random").pack(
+            side=tk.RIGHT
         )
+        centered.pack(side=tk.TOP)
+
+        ###########################################################################################
 
         tk.Button(image_controls, command=self.save_image, text="save").pack(
             side=tk.TOP
