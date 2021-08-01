@@ -7,6 +7,13 @@ A performant GUI mandelbrot explorer that enables zooming beyond hardware floati
 - [x] Deep zoom capability up to e300 on either CPU or GPU
 - [x] GUI for zooming
  
+## Examples
+
+<img src="img/ui.jpg" alt="UI example" width="600"/>
+<img src="img/colours.gif" alt="colours example" width="600"/>
+<img src="img/basic_zoom.gif" alt="basic zoom example" width="600"/>
+<img src="img/deep_zoom.gif" alt="deep zoom example" width="600"/>
+
 ## Usage
     python -m brot 
 
