@@ -88,8 +88,9 @@ class MandelbrotCL:
                 obj.set_arrays(height, width)
 
             def __exit__(self, *args):
-                cl.enqueue_copy(obj.queue, obj.iterations_grid, obj.ibuf).wait()
-                cl.enqueue_copy(obj.queue, obj.points_grid, obj.pbuf).wait()
+                cl.enqueue_copy(obj.queue, obj.iterations_grid, obj.ibuf)
+                cl.enqueue_copy(obj.queue, obj.points_grid, obj.pbuf)
+                obj.queue.finish()
                 obj.out = obj.iterations_grid, obj.points_grid
 
         return Manager()
