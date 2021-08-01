@@ -7,8 +7,8 @@ from utils.mandelbrot_utils import MandelbrotConfig
 
 def make_perturbation_state(config: MandelbrotConfig, ref_coords, reference: Reference):
     return PerturbationState(
-        config.get_width_per_pix(),
-        config.get_height_per_pix(),
+        float(config.get_width_per_pix()),
+        float(config.get_height_per_pix()),
         config.image_width,
         config.image_height,
         ref_coords,

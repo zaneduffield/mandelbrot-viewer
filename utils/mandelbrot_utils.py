@@ -62,10 +62,10 @@ class MandelbrotConfig:
         return self._convert_between_zoom_width(self.get_zoom())
 
     def get_width_per_pix(self):
-        return float((self.b_right().real - self.t_left().real) / self.image_width)
+        return (self.b_right().real - self.t_left().real) / self.image_width
 
     def get_height_per_pix(self):
-        return float((-self.b_right().imag + self.t_left().imag) / self.image_height)
+        return (-self.b_right().imag + self.t_left().imag) / self.image_height
 
     def get_point_by_coords(self, imag: int, real: int):
         return (
