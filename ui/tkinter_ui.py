@@ -16,7 +16,7 @@ from mandelbrot.controller import (
 )
 from mandelbrot_viewer import make_cli_args
 from opencl.mandelbrot_cl import PY_OPEN_CL_INSTALLED
-from ui.colouring import histogram_colouring, generate_palette
+from ui.colouring import cyclic_colouring, generate_palette
 from utils.constants import BREAKOUT_R2, GLITCH_ITER
 from utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
@@ -421,7 +421,7 @@ class FractalUI(tk.Frame):
         brot_pixels = iterations == self.compute_config.max_iterations
         iterations = convert_to_fractional_counts(iterations, points)
 
-        colours = histogram_colouring(iterations, self.palette, brot_pixels)
+        colours = cyclic_colouring(iterations, self.palette, brot_pixels)
         self.set_image(Image.fromarray(colours, "RGB"))
 
     def save_image(self):
