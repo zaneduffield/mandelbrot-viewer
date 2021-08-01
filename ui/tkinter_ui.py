@@ -10,7 +10,7 @@ from PIL import Image, ImageTk
 from gmpy2 import mpc, mpfr
 from tkinter.filedialog import asksaveasfile
 
-from mandelbrot.mandelbrot_controller import (
+from mandelbrot.controller import (
     MandelbrotController,
     convert_to_fractional_counts,
 )
