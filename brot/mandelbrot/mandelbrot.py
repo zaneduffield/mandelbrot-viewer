@@ -5,18 +5,19 @@ from brot.utils.constants import BREAKOUT_R2
 from brot.utils.mandelbrot_utils import MandelbrotConfig
 
 
-def mandelbrot(config: MandelbrotConfig):
+def mandelbrot(config: MandelbrotConfig, dtype=np.float64):
     return _mandelbrot(
         complex(config.t_left()),
         complex(config.b_right()),
         config.image_height,
         config.image_width,
         config.max_iterations,
+        dtype,
     )
 
 
 @njit(fastmath=True, parallel=True, nogil=True)
-def _mandelbrot(t_left, b_right, height, width, max_iter):
+def _mandelbrot(t_left, b_right, height, width, max_iter, dtype):
     iterations_grid = np.zeros((height, width), dtype=np.int32)
     final_points = np.zeros((height, width), dtype=np.complex128)
     t_left_r = t_left.real
@@ -27,8 +28,8 @@ def _mandelbrot(t_left, b_right, height, width, max_iter):
     for y in prange(height):
         c_imag = t_left_i - y * ver_step
         for x in prange(width):
-            c_real = t_left_r + x * hor_step
-            z_real = z_imag = 0
+            c_real = dtype(t_left_r + x * hor_step)
+            z_real = z_imag = dtype(0)
 
             i = 0
             while i < max_iter and z_real * z_real + z_imag * z_imag < BREAKOUT_R2:
