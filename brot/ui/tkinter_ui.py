@@ -100,12 +100,12 @@ class FractalUI(tk.Frame):
         center_im = tk.Frame(center_frame)
         tk.Label(center_re, text="Re:").pack(side=tk.LEFT)
         tk.Label(center_im, text="Im:").pack(side=tk.LEFT)
-        tk.Entry(center_re, textvariable=self.center_re, state="readonly", width=13).pack(
-            side=tk.LEFT
-        )
-        tk.Entry(center_im, textvariable=self.center_im, state="readonly", width=13).pack(
-            side=tk.LEFT
-        )
+        tk.Entry(
+            center_re, textvariable=self.center_re, state="readonly", width=13
+        ).pack(side=tk.LEFT)
+        tk.Entry(
+            center_im, textvariable=self.center_im, state="readonly", width=13
+        ).pack(side=tk.LEFT)
         center_re.pack(side=tk.TOP, fill=tk.X)
         center_im.pack(side=tk.TOP, fill=tk.X)
 
@@ -187,9 +187,7 @@ class FractalUI(tk.Frame):
         ###########################################################################################
 
         centered = tk.Frame(colour_controls)
-        tk.Button(centered, command=self.next_colour, text="next").pack(
-            side=tk.LEFT
-        )
+        tk.Button(centered, command=self.next_colour, text="next").pack(side=tk.LEFT)
         tk.Button(centered, command=self.random_colour, text="random").pack(
             side=tk.RIGHT
         )
@@ -443,7 +441,7 @@ class FractalUI(tk.Frame):
             mode="wb",
             filetypes=[("PNG", "*.png"), ("JPG", "*.jpg")],
             initialfile=f"mandelbrot-{time.strftime('%Y.%m.%d-%H.%M.%S')}",
-            defaultextension=".png"
+            defaultextension=".png",
         )
         if f is not None:
             with f:
