@@ -450,9 +450,9 @@ class FractalUI(tk.Frame):
 
 def run(config: MandelbrotConfig):
     root = tk.Tk()
-    icon = Path(__file__).parent / "brot.ico"
+    icon = Path(__file__).parent / "icon.png"
     if icon.exists():
-        root.iconbitmap(icon)
+        root.iconphoto(True, tk.PhotoImage(file=icon))
 
     if 0 in [config.image_height, config.image_width]:
         screen_size_prop = 0.4
