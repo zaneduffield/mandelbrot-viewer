@@ -43,9 +43,14 @@ def histogram_colouring(iterations, palette, brot_pixels, num_cycles=2, scale=10
     return colours
 
 
-def cyclic_colouring(iterations, palette, brot_pixels, num_cycles=3):
+def cyclic_colouring(
+    iterations,
+    palette,
+    brot_pixels,
+    num_cycles=3,
+    iter_range=10,
+):
     iterations = np.sqrt(iterations)
-    iter_range = np.maximum(1, np.ptp(iterations))
     a = iter_range / num_cycles
     iterations = iterations % a / a
 
