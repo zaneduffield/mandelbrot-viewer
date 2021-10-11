@@ -1,7 +1,7 @@
 import numpy as np
 
 
-BROT_COLOUR = (0, 0, 0)
+BROT_RGB = (0, 0, 0)
 
 RGB_OFFSET_PRESETS = (
     (0.28, 0.422, 0.438),
@@ -18,7 +18,9 @@ RGB_OFFSET_PRESETS = (
 CURR_PALETTE = 0
 
 
-def histogram_colouring(iterations, palette, brot_pixels, num_cycles=2, scale=100):
+def histogram_colouring(
+    iterations, palette, brot_pixels, num_cycles=2, scale=100, brot_rgb=BROT_RGB
+):
     # rescale to 0 so we can use the values as indices to the cumulative counts
     iterations -= np.min(iterations)
     iterations = (scale * iterations).astype(np.int64)
@@ -39,7 +41,7 @@ def histogram_colouring(iterations, palette, brot_pixels, num_cycles=2, scale=10
     ) % num_colours
 
     colours = (255 * palette[indices]).astype(np.uint8)
-    colours[brot_pixels] = BROT_COLOUR
+    colours[brot_pixels] = brot_rgb
     return colours
 
 
@@ -49,6 +51,7 @@ def cyclic_colouring(
     brot_pixels,
     num_cycles=3,
     iter_range=10,
+    brot_rgb = BROT_RGB,
 ):
     iterations = np.sqrt(iterations)
     a = iter_range / num_cycles
@@ -57,7 +60,7 @@ def cyclic_colouring(
     num_colours = len(palette) - 1
     indices = np.round(num_colours * iterations).astype(np.int32)
     colours = (255 * palette[indices]).astype(np.uint8)
-    colours[brot_pixels] = BROT_COLOUR
+    colours[brot_pixels] = brot_rgb
     return colours
 
 
