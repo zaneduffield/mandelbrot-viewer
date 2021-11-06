@@ -32,9 +32,7 @@ class MandelbrotCL:
         self.out = None
 
         self._compile_cache = {}
-        for double_precision in [True, False]:
-            self._double_precision = double_precision
-            self.compile()
+        self._double_precision = None
 
     def get_program_contents(self):
         raise NotImplemented
@@ -58,14 +56,16 @@ class MandelbrotCL:
             if double_precision:
                 program_contents = program_contents.replace("float", "double")
 
+            my_logger.debug("compiling...")
             prg = cl.Program(self.ctx, program_contents).build()
+            my_logger.debug("done")
+
             self._compile_cache[double_precision] = prg
+
         return self._compile_cache[double_precision]
 
     def compile(self):
-        my_logger.debug("compiling...")
         self.prg = self._get_cl_program(self._double_precision)
-        my_logger.debug("done")
 
     def set_arrays(self, height, width):
         if self.shape != (height, width):
