@@ -19,6 +19,7 @@ def make_perturbation_state(config: MandelbrotConfig, ref_coords, reference: Ref
         reference.accurate_iters,
         config.max_iterations,
         reference.scaling_factor,
+        config.glitch_error_threshold,
     )
 
 
@@ -36,6 +37,7 @@ def make_perturbation_state(config: MandelbrotConfig, ref_coords, reference: Ref
         ("iter_accurate", int32),
         ("max_iterations", int32),
         ("scaling_factor", float64),
+        ("glitch_error_threshold", float64),
     ]
 )
 class PerturbationState:
@@ -53,6 +55,7 @@ class PerturbationState:
         iter_accurate,
         max_iterations,
         scaling_factor,
+        glitch_error_threshold,
     ):
         self.w_per_pix = w_per_pix
         self.h_per_pix = h_per_pix
@@ -65,3 +68,4 @@ class PerturbationState:
         self.iter_accurate = iter_accurate
         self.max_iterations = max_iterations
         self.scaling_factor = scaling_factor
+        self.glitch_error_threshold = glitch_error_threshold

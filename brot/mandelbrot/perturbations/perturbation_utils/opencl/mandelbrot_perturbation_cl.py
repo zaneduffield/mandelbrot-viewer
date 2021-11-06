@@ -9,7 +9,6 @@ from brot.mandelbrot.perturbations.perturbation_utils.perturbed_iteration import
 from brot.utils.constants import (
     GLITCH_ITER,
     BREAKOUT_R2,
-    GLITCH_DIFF_THRESHOLD,
 )
 from brot.utils.mandelbrot_utils import my_logger
 
@@ -54,7 +53,7 @@ class PerturbationCL(MandelbrotCL):
             np.int32(pert.iter_accurate),
             np.int32(pert.max_iterations),
             np.int32(GLITCH_ITER),
-            real_dtype(GLITCH_DIFF_THRESHOLD),
+            real_dtype(pert.glitch_error_threshold),
             np.int32(fix_glitches),
             np.int32(BREAKOUT_R2),
         )

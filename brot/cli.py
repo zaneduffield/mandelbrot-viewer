@@ -1,6 +1,7 @@
 import argparse
 
 from gmpy2 import mpfr, mpc, get_context
+from brot.utils.constants import GLITCH_ERROR_THRESHOLD
 
 from brot.utils.mandelbrot_utils import MandelbrotConfig, my_logger
 
@@ -57,6 +58,9 @@ def make_config():
         help="Use perturbation theory for high precision computation.",
     )
     parser.add_argument(
+        "-gt", "--glitch-error-threshold", type=float, default=GLITCH_ERROR_THRESHOLD
+    )
+    parser.add_argument(
         "-g", "--gpu", action="store_true", help="Use GPU via OpenCL to render"
     )
     parser.add_argument(
@@ -82,6 +86,7 @@ def make_config():
         perturbation=args.perturbation,
         gpu=args.gpu,
         gpu_double_precision=args.gpu_double,
+        glitch_error_threshold=args.glitch_error_threshold,
     )
     config.set_center_and_zoom(center=mpc(args.center), zoom=mpfr(args.zoom))
 

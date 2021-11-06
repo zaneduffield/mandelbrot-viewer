@@ -5,7 +5,6 @@ from .perturbation_state import PerturbationState
 from brot.utils.constants import (
     GLITCH_ITER,
     BREAKOUT_R2,
-    GLITCH_DIFF_THRESHOLD,
 )
 
 
@@ -52,7 +51,7 @@ def approximate_pixel(data: PerturbationState, x, y, iterations_grid, points):
         if actual_size > BREAKOUT_R2:
             break
 
-        if actual_size < GLITCH_DIFF_THRESHOLD * sq_mod(ref_i) or (
+        if actual_size < data.glitch_error_threshold * sq_mod(ref_i) or (
             i == data.breakout and data.breakout < data.max_iterations
         ):
             iterations_grid[y, x] = GLITCH_ITER

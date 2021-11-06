@@ -14,7 +14,8 @@ class MandelbrotConfig:
     max_iterations: int
     perturbation: bool
     gpu: bool
-    gpu_double_precision: bool = False
+    gpu_double_precision: bool
+    glitch_error_threshold: float
 
     _center: mpc = None
     _zoom: mpfr = None
